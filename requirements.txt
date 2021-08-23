@@ -1,0 +1,7 @@
+amba-event-stream
+faust-streaming
+heapdict
+
+mkdocs
+mkdocs-material
+mkdocstrings
