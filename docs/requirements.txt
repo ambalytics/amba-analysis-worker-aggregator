@@ -1,0 +1,6 @@
+pymongo
+amba-event-stream
+
+mkdocs
+mkdocs-material
+mkdocstrings

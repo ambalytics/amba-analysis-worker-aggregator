@@ -1,0 +1,26 @@
+site_name: Amba Analysis Worker Aggregator
+site_description: 'documentation for amba-analysis-worker-aggregator'
+site_author: 'Lukas Jesche'
+docs_dir: docs/
+repo_name: 'ambalytics/amba-analysis-worker-aggregator'
+repo_url: 'https://github.com/ambalytics/amba-analysis-worker-aggregator'
+nav:
+    - Home: index.md
+    - Code Reference:
+        aggregator: aggregator_ref.md
+
+theme:
+  name: material
+  palette:
+    scheme: preference
+    primary: teal
+    accent: purple
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          setup_commands:
+            - import sys
+            - sys.path.append("src")
