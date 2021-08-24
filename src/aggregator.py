@@ -28,6 +28,7 @@ class Event(faust.Record):
     subj: Subj
 
     def get_score(self):
+        """ get score of this event """
         return self.subj.processed.score
 
     def __lt__(self, other):
@@ -106,7 +107,7 @@ processed_topic = app.topic('events_processed-discusses', value_type=Event)
 aggregated_topic = app.topic('events_aggregated')
 # count_table = app.Table('count_processed_events', default=int).hopping(10, 5, expires=timedelta(minutes=10))
 # time in seconds, first is window size, second is time between creation
-score_table = app.Table('score_processed_events', default=int).hopping(3600, 60, expires=timedelta(minutes=60))
+score_table = app.Table('score_processed_events', default=int).hopping(timedelta(minutes=60), timedelta(minutes=5), expires=timedelta(minutes=120))
 
 trending = TrendingHeap()
 
@@ -116,6 +117,11 @@ trending = TrendingHeap()
 
 @app.agent(processed_topic, sink=[aggregated_topic])
 async def aggregate(events):
+    """ aggregate events
+
+    Arguments:
+        events: events from topic
+    """
     async for event in events.group_by(Event.obj_id):
         # count_table[event.obj_id] += 1
         score_table[event.obj_id] += event.get_score()
