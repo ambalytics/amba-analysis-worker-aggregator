@@ -299,6 +299,13 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#aggregator.Event.get_score" class="md-nav__link">
+    get_score()
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -421,6 +428,13 @@
           <li class="md-nav__item">
   <a href="#aggregator.Event.__lt__" class="md-nav__link">
     __lt__()
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#aggregator.Event.get_score" class="md-nav__link">
+    get_score()
   </a>
   
 </li>
@@ -599,6 +613,32 @@
 
 
 
+
+
+  <div class="doc doc-object doc-method">
+
+
+
+<h3 id="aggregator.Event.get_score" class="doc doc-heading">
+<code class="highlight language-python"><span class="n">get_score</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></code>
+
+
+</h3>
+
+    <div class="doc doc-contents ">
+
+      <p>get score of this event </p>
+
+        <details class="quote">
+          <summary>Source code in <code>src/aggregator.py</code></summary>
+          <div class="highlight"><pre><span></span><code><span class="k">def</span> <span class="nf">get_score</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; get score of this event &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">subj</span><span class="o">.</span><span class="n">processed</span><span class="o">.</span><span class="n">score</span>
+</code></pre></div>
+        </details>
+    </div>
+
+  </div>
 
 
 
