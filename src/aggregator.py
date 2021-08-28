@@ -1,15 +1,21 @@
 import copy
 import datetime
 import time
+import types
 import uuid
 from datetime import timedelta
+from heapq import heappop
+from typing import cast
 
 import heapdict
 import faust
+from faust import SlidingWindow
+from faust.types.windows import WindowT
 
 app = faust.App(
     'aggregator',
     broker='kafka:9092',
+    stream_publish_on_commit=False,
 )
 
 # todo wait for kafka
@@ -47,15 +53,19 @@ class TrendingHeap(object):
         """ init an empty heapdict """
         self.heap = heapdict.heapdict()
 
-    def update(self, key, score):
+    def update(self, key, window):
         """ update the heapdict, return true if changes, false if not
 
         return true if full and update happened
          """
+        # update heap data
+        for k in self.heap.keys():
+            self.heap[k] = window[k].delta(timedelta(minutes=60))
+
         if self.contains(key):
-            self.heap[key] = score
             return self.is_full()
         else:
+            score = window[key].delta(timedelta(minutes=60))
             if not self.is_full():
                 self.heap[key] = score
                 return self.is_full()
@@ -102,15 +112,53 @@ class TrendingHeap(object):
         result['aggregated_data'] = aggregated_data
         return result
 
+def _custom_del_old_keys(self) -> None:
+    window = cast(WindowT, self.window)
+    assert window
+    for partition, timestamps in self._partition_timestamps.items():
+        while timestamps and window.stale(
+                timestamps[0],
+                self._partition_latest_timestamp[partition]):
+            timestamp = heappop(timestamps)
+            keysList = [self._partition_timestamp_keys.get((partition, window_range[1])) for window_range in self._window_ranges(timestamp) ]
+            keys_to_remove = self._partition_timestamp_keys.pop(
+                (partition, timestamp), None)
+            if keys_to_remove:
+                windowData = [ item for keys in keysList for key in keys for item in self.data.get(key, None)]
+                for key in keys_to_remove:
+                    value = self.data.pop(key, None)
+                    if key[1][0] > self.last_closed_window:
+                        self.on_window_close(key, windowData)
+                self.last_closed_window = max(
+                    self.last_closed_window,
+                    max(key[1][0] for key in keys_to_remove),
+                )
+
+
+# def window_processor(key, event):
+    # print(key)
+    # print(event)
+    # print('window end')
+
 
 processed_topic = app.topic('events_processed-discusses', value_type=Event)
 aggregated_topic = app.topic('events_aggregated')
 # count_table = app.Table('count_processed_events', default=int).hopping(10, 5, expires=timedelta(minutes=10))
 # time in seconds, first is window size, second is time between creation
-score_table = app.Table('score_processed_events', default=int).hopping(timedelta(minutes=60), timedelta(minutes=5), expires=timedelta(minutes=120))
+
+score_table = app.Table('score_processed_events', default=int)\
+    .hopping(timedelta(minutes=60), timedelta(minutes=1), expires=timedelta(minutes=70))
+# on_window_close=window_processor
+
+# score_table._del_old_keys = types.MethodType(_custom_del_old_keys, score_table)
 
 trending = TrendingHeap()
 
+
+# todo save them using current
+# but in own table not window
+# or all in heap?
+# remove elements on window close, using window delta?
 
 # , key_index=True
 # https://github.com/robinhood/faust/issues/473
@@ -122,12 +170,15 @@ async def aggregate(events):
     Arguments:
         events: events from topic
     """
+    time_last_publish = time.time()
     async for event in events.group_by(Event.obj_id):
         # count_table[event.obj_id] += 1
         score_table[event.obj_id] += event.get_score()
-        if trending.update(event.obj_id, score_table[event.obj_id].current()):
-            print('update')
-            yield trending.get_json()
+        if trending.update(event.obj_id, score_table):
+            # print('update')
+            if time.time() - time_last_publish > 5:
+                time_last_publish = time.time()
+                yield trending.get_json()
         # check if obj_id in heap
         # true update
         # false
