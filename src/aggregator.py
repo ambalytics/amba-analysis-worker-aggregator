@@ -11,7 +11,7 @@ from typing import cast
 import faust
 from faust.types.windows import WindowT
 
-broker = os.environ['KAFKA_BOOTRSTRAP_SERVER']
+broker = os.environ.get('KAFKA_BOOTRSTRAP_SERVER', 'kafka:9092')
 app = faust.App(
     'aggregator',
     broker=broker,
