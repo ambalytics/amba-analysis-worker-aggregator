@@ -126,7 +126,7 @@ async def aggregate(events):
     async for event in events.group_by(Event.obj_id):
         # count_table[event.obj_id] += 1
         score_table[event.obj_id] += event.get_score()
-        if time.time() - time_last_publish > 5:
+        if time.time() - time_last_publish > 2:
             time_last_publish = time.time()
             # yield trending.get_json()
             time_event = time.time()
