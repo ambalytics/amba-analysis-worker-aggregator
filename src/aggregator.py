@@ -132,7 +132,7 @@ async def aggregate(events):
             time_event = time.time()
             list_of_trends = list(score_table.relative_to_now().items().delta(timedelta(minutes=60 * time_main)))
             result = get_json(sorted(list_of_trends, key=lambda k: k[1], reverse=True)[:15])
-            print(len(list_of_trends) / ((time.time() - time_event) * 1000))
+            # print(len(list_of_trends) / ((time.time() - time_event) * 1000))
             yield result
             #     'trends': l,
             # }
