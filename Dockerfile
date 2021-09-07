@@ -11,4 +11,5 @@ COPY ./src/aggregator.py /aggregator.py
 
 #CMD ["faust", "-A", "aggregator", "worker", "-l", "info"]
 #CMD [ "python", "./src/aggregator.py", "worker", "-l", "info"]
-ENTRYPOINT ["/bin/bash", "-c", "./scripts/entrypoint.sh"]
+#ENTRYPOINT ["/bin/bash", "-c", "./scripts/entrypoint.sh"]
+ENTRYPOINT ["sh", "./scripts/entrypoint.sh"]
