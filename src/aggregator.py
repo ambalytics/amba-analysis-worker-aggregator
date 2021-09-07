@@ -115,6 +115,9 @@ score_table = app.Table('score_processed_events', default=int, partitions=1) \
 # , key_index=True
 # https://github.com/robinhood/faust/issues/473
 
+# run every 5 min to deuce score score *= 0.9
+# this way a newer tweet has more priority
+
 @app.agent(processed_topic, sink=[aggregated_topic])
 async def aggregate(events):
     """ aggregate events
