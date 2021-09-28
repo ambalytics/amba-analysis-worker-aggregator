@@ -7,11 +7,15 @@ import uuid
 from datetime import timedelta
 from heapq import heappop
 from typing import cast
-
+from influxdb_client.client.write_api import ASYNCHRONOUS
+import asyncio
 from event_stream import dao
 from event_stream.models.model import *
 from influxdb_client import InfluxDBClient, BucketRetentionRules
 from sqlalchemy.orm import sessionmaker, scoped_session
+import pandas as pd
+import pymannkendall as mk
+from sqlalchemy import text, bindparam
 
 import faust
 from faust.types.windows import WindowT
@@ -33,7 +37,7 @@ aggregated_topic = app.topic('events_aggregated')
 org = os.environ.get('INFLUXDB_V2_ORG', 'ambalytics')
 
 client = InfluxDBClient.from_env_properties()
-write_api = client.write_api()
+write_api = client.write_api(write_options=ASYNCHRONOUS)
 query_api = client.query_api()
 
 bucket_definition = [
@@ -49,37 +53,45 @@ bucket_definition = [
 ]
 
 trending_time_definition = {
-    'hour': {
-        'name': 'hour',
+    'now': {
+        'name': 'now',
         'bucket': 'trending',
-        'duration': timedelta(hours=-1),
-        'trending_interval': timedelta(minutes=1),
-        'time_exponent': -0.0006,
+        'duration': timedelta(hours=-6),
+        'trending_interval': timedelta(minutes=3),
+        'time_exponent': -0.00036,
         'window_size': timedelta(minutes=6),
+        'min_count': 20,
+        'window_count': 40,
     },
     'today': {
         'name': 'today',
         'bucket': 'trending',
         'duration': timedelta(hours=-24),
-        'trending_interval': timedelta(minutes=5),
+        'trending_interval': timedelta(minutes=60),
         'time_exponent': -0.000025,
-        'window_size': timedelta(minutes=144),
+        'window_size': timedelta(minutes=24),
+        'min_count': 80,
+        'window_count': 60,
     },
     'week': {
         'name': 'week',
         'bucket': 'trending',
         'duration': timedelta(days=-7),
-        'trending_interval': timedelta(hours=1),
+        'trending_interval': timedelta(hours=6),
         'time_exponent': -0.00000357142857,
-        'window_size': timedelta(minutes=1008),
+        'window_size': timedelta(minutes=168),
+        'min_count': 200,
+        'window_count': 60,
     },
     'month': {
         'name': 'month',
         'bucket': 'trending',
         'duration': timedelta(days=-30),
-        'trending_interval': timedelta(hours=6),
+        'trending_interval': timedelta(hours=12),
         'time_exponent': -0.000000833333333,
-        'window_size': timedelta(minutes=4320),
+        'window_size': timedelta(minutes=720),
+        'min_count': 500,
+        'window_count': 60,
     }
 }
 
@@ -101,110 +113,224 @@ async def init_influx():
                                                            retention_rules=retention_rules, org=org)
             else:
                 created_bucket = buckets_api.create_bucket(bucket_name=td['name'], org=org)
-            # todo setup tasks
-            # https://influxdb-client.readthedocs.io/en/stable/api.html#tasksapi
+
+    # https://influxdb-client.readthedocs.io/en/stable/api.html#tasksapi
+
+    org_api = client.organizations_api()
+    org_obj = org_api.find_organizations(org=org)[0]
+
+    tasks_api = client.tasks_api()
+    task = """
+        _window = 1h
+        
+        baseTable = from(bucket: "trending")
+          |> range(start: -6h, stop: now())
+          |> filter(fn: (r) => r["_measurement"] == "trending")
+        
+        a = baseTable
+          |> filter(fn: (r) => r["_field"] == "followers")
+          |> aggregateWindow(fn: sum, every: _window, createEmpty: false)
+          |> group()
+          |> keep(columns: ["_value", "_time", "doi"])
+          |> rename(columns: {_value: "sum_followers"})
+        
+        b = baseTable
+          |> filter(fn: (r) => r["_field"] == "sentiment_raw")
+          |> aggregateWindow(fn: median, every: _window, createEmpty: false)
+          |> group()
+          |> keep(columns: ["_value", "_time", "doi"])
+          |> rename(columns: {_value: "median_sentiment"})
+        
+        join1 = join(
+          tables: {a:a, b:b},
+          on: ["doi", "_time"]
+        )
+          |> map(fn: (r) => ({r with _time: uint(v: r._time)}))
+        
+        c = baseTable
+          |> filter(fn: (r) => r["_field"] == "contains_abstract_raw")
+          |> aggregateWindow(fn: median, every: _window, createEmpty: false)
+          |> group()
+          |> keep(columns: ["_value", "_time", "doi"])
+          |> map(fn: (r) => ({r with _time: uint(v: r._time)}))
+          |> rename(columns: {_value: "contains_abstract_raw"})
+        
+        join2 = join(
+          tables: {join1:join1, c:c},
+          on: ["doi", "_time"]
+        )
+        
+        ad = baseTable
+          |> filter(fn: (r) => r["_field"] == "questions")
+          |> aggregateWindow(fn: mean, every: _window, createEmpty: false)
+          |> group()
+          |> keep(columns: ["_value", "_time", "doi"])
+          |> map(fn: (r) => ({r with _time: uint(v: r._time)}))
+          |> rename(columns: {_value: "questions"})
+        
+        join3 = join(
+          tables: {join2:join2, ad:ad},
+          on: ["doi", "_time"]
+        )
+        
+        e = baseTable
+          |> filter(fn: (r) => r["_field"] == "exclamations")
+          |> aggregateWindow(fn: mean, every: _window, createEmpty: false)
+          |> group()
+          |> keep(columns: ["_value", "_time", "doi"])
+          |> map(fn: (r) => ({r with _time: uint(v: r._time)}))
+          |> rename(columns: {_value: "exclamations"})
+        
+        join4 = join(
+          tables: {join3:join3, e:e},
+          on: ["doi", "_time"]
+        )
+        
+        j = baseTable
+          |> filter(fn: (r) => r["_field"] == "length")
+          |> aggregateWindow(fn: count, every: _window, createEmpty: false)
+          |> group()
+          |> keep(columns: ["_value", "_time", "doi"])
+          |> map(fn: (r) => ({r with _time: uint(v: r._time)}))
+          |> rename(columns: {_value: "count"})
+        
+        join46 = join(
+          tables: {join4:join4, j:j},
+          on: ["doi", "_time"]
+        )
+        
+        f = baseTable
+          |> filter(fn: (r) => r["_field"] == "length")
+          |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+          |> aggregateWindow(fn: median, every: _window, createEmpty: false)
+          |> group()
+          |> keep(columns: ["_value", "_time", "doi"])
+          |> map(fn: (r) => ({r with _time: uint(v: r._time)}))
+          |> rename(columns: {_value: "length"})
+        
+        join5 = join(
+          tables: {join46:join46, f:f},
+          on: ["doi", "_time"]
+        )
+        
+        jk = baseTable
+          |> filter(fn: (r) => r["_field"] == "bot_rating")
+          |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+          |> aggregateWindow(fn: mean, every: _window, createEmpty: false)
+          |> group()
+          |> keep(columns: ["_value", "_time", "doi"])
+          |> map(fn: (r) => ({r with _time: uint(v: r._time)}))
+          |> rename(columns: {_value: "mean_bot_rating"})
+        
+        join6 = join(
+          tables: {join5:join5, jk:jk},
+          on: ["doi", "_time"]
+        )
+          |> map(fn:(r) => ({ r with _time: time(v:r._time) }))
+          |> group(columns: ["doi"])
+          |> to(bucket: "history", org: "ambalytics")
+    """
+    task = tasks_api.create_task_every(name="make_history", flux=task, every="6h", organization=org_obj)
 
 
-@app.timer(interval=trending_time_definition['hour']['trending_interval'])
+async def run_trend_calculation(trending_time):
+    loop = asyncio.get_event_loop()
+    # Using None will create a ThreadPoolExecutor
+    # you can also pass in an executor (Thread or Process)
+    await loop.run_in_executor(None, get_base_trend_table, trending_time)
+
+
+@app.timer(interval=trending_time_definition['now']['trending_interval'])
 async def trend_calc():
     print('calc trend hour')
-    # bucket = trending_time_definition['hour']['bucket']
-    get_base_trend_table(trending_time_definition['hour'])
-    # get all scores
-
-    # create dict doi => trending object
-    # update them on doing further stuff
-
-    # get count
-    # get median sentiment
-
-    # sum_follower
-
-    # we wan't rows to save into postgres
-
-    # select all rows with this duration
-    # delete them
-    # than save new
-    # print(results)
+    await run_trend_calculation(trending_time_definition['now'])
 
 
 @app.timer(interval=trending_time_definition['today']['trending_interval'])
 async def trend_calc():
     print('calc trend today')
-    get_base_trend_table(trending_time_definition['today'])
+    await run_trend_calculation(trending_time_definition['today'])
 
 
-@app.timer(interval=trending_time_definition['week']['trending_interval'])
-async def trend_calc():
-    print('calc trend week')
-    get_base_trend_table(trending_time_definition['week'])
+# @app.timer(interval=trending_time_definition['week']['trending_interval'])
+# async def trend_calc():
+#     print('calc trend week')
+#     get_base_trend_table(trending_time_definition['week'])
 
 
-# import "math"
-# from(bucket: "discussion")
-#   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-#   |> filter(fn: (r) => r["_measurement"] == "trending")
-#   |> filter(fn: (r) => r["_field"] == "score")
-#   //|> aggregateWindow(every: 5s, fn: sum, createEmpty: false)
-#   //|> map(fn: (r) => ({ time: uint(v: now()) - uint(v: r._time) }))
-#   //|> map(fn: (r) => ({ time: 0.1*float(v: uint(v: now()) - uint(v: r._time)) }))
-#   //|> map(fn: (r) => ({ _value: float(v: r._value) * 22.1 }))
-#   //|> map(fn:(r) => ({ r with _value: float(v: r._value) * 22.2 }))
-#   |> map(fn:(r) => ({ r with _value: float(v: r._value) * math.exp(x: -0.000000000001*float(v: uint(v: now()) - uint(v: r._time))) }))
-#   //|> map(fn:(r) => ({ r with _value:  float(v: uint(v: now()) - uint(v: r._time)) * 0.000000004 }))
-#   |> cumulativeSum(columns: ["_value"])
-
-
-def get_base_query(start=60, stop=None, doi=None):
-    query = '''
-        import "math"
-        from(bucket: _bucket)
+def get_doi_list_trending(trending):
+    p = {"_bucket": trending['bucket'],
+         "_min_count": trending['min_count'],
+         "_start": trending['duration'],
+         }
+    # |> range(start: 2021-09-24T14:00:00Z, stop: 2021-09-24T19:00:00Z)
+    query = """
+    _stop = now()
+    countTable = from(bucket: _bucket)
         |> range(start: _start, stop: _stop)
         |> filter(fn: (r) => r["_measurement"] == "trending")
         |> filter(fn: (r) => r["_field"] == "score")
-        |> group(columns: ["doi"])
-        '''
-    if doi:
-        query += '|> filter(fn: (r) => r["doi"] == _doi)'
-    return query
+        |> count()
+        |> filter(fn: (r) => r["_value"] > _min_count)
+        |> group()
+        |> keep(columns: ["doi"])
+        |> yield()  
+    """
 
-
-def run_query(query, params):
-    result = query_api.query(org=org, query=query, params=params)
+    result = query_api.query(org=org, query=query, params=p)
     results = []
     for table in result:
         for record in table.records:
-            results.append((record.get_value(), record.get_field()))
+            results.append(record['doi'])
     print(results)
     return results
 
 
-#
-# def get_time_adjusted_score_sum(trending_time_name, doi=None):
-#     query = get_base_query(time_interval, doi)
-#
-#     query += '''
-#           |> map(fn:(r) => ({ r with _value: float(v: r._value) * math.exp(x: _exp*float(v: uint(v: now()) - uint(v: r._time))) }))
-#           |> cumulativeSum(columns: ["_value"])
-#           |> last()
-#
-#
-#     calculate_trending_score = """
-#         import "math"
-#         from(bucket: "trending")
-#           |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-#           |> filter(fn: (r) => r["_measurement"] == "trending")
-#           |> filter(fn: (r) => r["_field"] == "score")
-#           |> keep(columns: ["_value", "_time", "doi"])
-#           |> map(fn:(r) => ({ r with _value: float(v: r._value) * math.exp(x: -0.0000000000006*float(v: uint(v: now()) - uint(v: r._time))) }))
-#           |> cumulativeSum(columns: ["_value"])
-#           |> last(column: "_value")
-#           |> keep(columns: ["_value", "doi"])
-#           |> group(columns: ["_value", "doi"])
-#           |> sort(columns: ["_value"], desc: true)
-#     """
-#     '''
-#     return run_query(query)
+def calculate_trend(data):
+    result = {}
+    for d in data:
+        doi = d['doi']
+        df = d['df']
+        # print(doi)
+        # print(len(df.index))
+        trend = mk.yue_wang_modification_test(df)
+        # print(trend.slope)
+        result[doi] = trend.slope
+    return result
+    # print(results[0]['df'].head())
+
+
+def get_dataframes(trending):
+    p = {"_bucket": trending['bucket'],
+         "_doi_list": get_doi_list_trending(trending),
+         "_start": trending['duration'],
+         }
+    query = """
+    _stop = now()
+    totalTable = from(bucket: "trending")
+        |> range(start: _start, stop: _stop)
+        |> filter(fn: (r) => r["_measurement"] == "trending")
+        |> filter(fn: (r) => r["_field"] == "score")
+        |> filter(fn: (r) => contains(value: r["doi"], set: _doi_list))
+        |> yield()
+    """
+    # data = query_api.query_data_frame(org=org, query=query, params=p)
+
+    result = query_api.query(org=org, query=query, params=p)
+    results = []
+    for table in result:
+        scores = []
+        times = []
+        doi = None
+        for record in table.records:
+            if not doi:
+                doi = record['doi']
+            scores.append(record['_value'])
+            times.append(record['_time'])
+        df = pd.DataFrame(data={'score': scores}, index=times)
+        results.append({"doi": doi, "df": df})
+
+    return results
 
 
 def get_base_trend_table(trending):
@@ -212,389 +338,433 @@ def get_base_trend_table(trending):
          "_bucket": trending['bucket'],
          "_exponent": trending['time_exponent'],
          "_window": trending['window_size'],
+         "_window_count": trending['window_count'],
+         "_doi_list": get_doi_list_trending(trending)
          }
     query = '''
-            import "math"
-            a = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "followers")
-              |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-              |> sum()
-              |> group()
-              |> keep(columns: ["_value", "doi"])
-              |> rename(columns: {_value: "sum_followers"})
-            
-            b = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "sentiment_raw")
-              |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-              |> median()
-              |> group()
-              |> keep(columns: ["_value", "doi"])
-              |> rename(columns: {_value: "median_sentiment"})
-              
-            c = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "contains_abstract_raw")
-              |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-              |> median()
-              |> group()
-              |> keep(columns: ["_value", "doi"])
-              |> rename(columns: {_value: "contains_abstract_raw"})
-            
-            ad = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "questions")
-              |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-              |> mean()
-              |> group()
-              |> keep(columns: ["_value", "doi"])
-              |> rename(columns: {_value: "questions"})
-            
-            e = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "exclamations")
-              |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-              |> mean()
-              |> group()
-              |> keep(columns: ["_value", "doi"])
-              |> rename(columns: {_value: "exclamations"})
-            
-            f = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "length")
-              |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-              |> median()
-              |> group()
-              |> keep(columns: ["_value", "doi"])
-              |> rename(columns: {_value: "length"})
-            
-            g = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "length")
-              |> map(fn: (r) => ({r with _value: math.round(x: float(v: uint(v: now()) - uint(v: r._time)) / (10.0 ^ 9.0)) }))
-              |> median()
-              |> group()
-              |> keep(columns: ["_value", "doi"])
-              |> rename(columns: {_value: "median_age"})
-            
-            j =  from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> count()
-              |> group()
-              |> keep(columns: ["_value", "doi"])
-              |> rename(columns: {_value: "count"})
-            
-            score = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "score")
-              |> keep(columns: ["_value", "_time", "doi"])
-              |> map(fn:(r) => ({ r with _value: float(v: r._value) * math.exp(x: _exponent * float(v: uint(v: now()) - uint(v: r._time)) / (10.0 ^ 9.0)) }))
-              |> cumulativeSum(columns: ["_value"])
-              |> last(column: "_value")
-              |> keep(columns: ["_value", "doi"])
-              |> group()
-              |> rename(columns: {_value: "score"})
-            
-            predict = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "score")
-              |> aggregateWindow(every: _window, fn: sum, createEmpty: true)
-              |> holtWinters(n: 1,  seasonality: 0, interval: _window, withFit: false, timeColumn: "_time", column: "_value")
-              |> group()
-              |> keep(columns: ["_value", "doi"])
-              |> rename(columns: {_value: "prediction"})
-            
-            
-            pcompare = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "score")
-              |> aggregateWindow(every: _window, fn: sum, createEmpty: true)
-              |> last()
-              |> group()
-              |> keep(columns: ["_value", "doi"])
-              |> rename(columns: {_value: "last_window"})
-            
-            pmedian = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "score")
-              |> aggregateWindow(every: _window, fn: sum, createEmpty: true)
-              |> median()
-              |> group()
-              |> keep(columns: ["_value", "doi"])
-              |> rename(columns: {_value: "window_median"})
-            
-            // pcompare |> yield(name: "pcompare")
-            
-            join0 = join(
-              tables: {score:score, a:a},
-              on: ["doi"])
-            
-            join1 = join(
-              tables: {join0:join0, b:b},
-              on: ["doi"]
-            )
-            
-            join2 = join(
-              tables: {join1:join1, c:c},
-              on: ["doi"]
-            )
-            
-            join3 = join(
-              tables: {join2:join2, ad:ad},
-              on: ["doi"]
-            )
-            
-            join4 = join(
-              tables: {join3:join3, e:e},
-              on: ["doi"]
-            )
-            
-            join46 = join(
-              tables: {join4:join4, j:j},
-              on: ["doi"]
-            )
-            
-            join5 = join(
-              tables: {join46:join46, f:f},
-              on: ["doi"]
-            )
-            
-            
-            join6 = join(
-              tables: {join5:join5, g:g},
-              on: ["doi"]
-            )
-            
-            join7 = join(
-              tables: {join6:join6, predict:predict},
-              on: ["doi"]
-            )
-            
-            join8 = join(
-              tables: {join7:join7, pcompare:pcompare},
-              on: ["doi"]
-            )
-            
-            join9 = join(
-              tables: {join8:join8, pmedian:pmedian},
-              on: ["doi"]
-            )
-        
-            aaaa = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "lang")
-              |> group(columns: ["doi", "language"])
-              |> distinct()
-              |> count()
-              |> keep(columns: ["doi", "_value"])
-              |> group()
-              |> rename(columns: {_value: "species"})
-            
-            ffff = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "lang")
-              |> group(columns: ["doi"])
-              |> count()
-              |> keep(columns: ["doi", "_value"])
-              |> group()
-              |> rename(columns: {_value: "total"})
-            
-            cccc = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "lang")
-              |> duplicate(column: "_value", as: "language")
-              |> group(columns: ["doi", "language"])
-              |> count()
-              |> keep(columns: ["doi", "language", "_value"])
-              |> group()
-              |> rename(columns: {_value: "n"})
-            
-            gggg = join(
-              tables: {ffff:ffff, cccc:cccc},
-              on: ["doi"]
-            )
-              |> map(fn: (r) => ({ r with _value: -1.0 * float(v: r.n) / float(v: r.total)  * math.log(x: float(v: r.n) / float(v: r.total)) }))
-              |> group(columns: ["doi"])
-              |> sum()
-              |> group()
-              |> rename(columns: {_value: "shanon"})
-            
-            eeee = join(
-              tables: {aaaa:aaaa, gggg:gggg},
-              on: ["doi"]
-            )
-            |> map(fn: (r) => ({ r with eveness_lang: 
-                if r.species > 1 and r.shanon > 0 then float(v: r.shanon) / math.log(x: float(v: r.species)) 
-                else 1.0
-              }))
-            |> keep(columns: ["doi", "eveness_lang"])
-        
-        
-            aa = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "author_name")
-              |> group(columns: ["doi", "author_name"])
-              |> distinct()
-              |> count()
-              |> keep(columns: ["doi", "_value"])
-              |> group()
-              |> rename(columns: {_value: "species"})
-            
-            ff = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "author_name")
-              |> group(columns: ["doi"])
-              |> count()
-              |> keep(columns: ["doi", "_value"])
-              |> group()
-              |> rename(columns: {_value: "total"})
-            
-            cc = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "author_name")
-              |> duplicate(column: "_value", as: "author_name")
-              |> group(columns: ["doi", "author_name"])
-              |> count()
-              |> keep(columns: ["doi", "author_name", "_value"])
-              |> group()
-              |> rename(columns: {_value: "n"})
-            
-            gg = join(
-              tables: {ff:ff, cc:cc},
-              on: ["doi"]
-            )
-              |> map(fn: (r) => ({ r with _value: -1.0 * float(v: r.n) / float(v: r.total)  * math.log(x: float(v: r.n) / float(v: r.total)) }))
-              |> group(columns: ["doi"])
-              |> sum()
-              |> group()
-              |> rename(columns: {_value: "shanon"})
-            
-            ee = join(
-              tables: {aa:aa, gg:gg},
-              on: ["doi"]
-            )
-            |> map(fn: (r) => ({ r with eveness_author: 
-                if r.species > 1 and r.shanon > 0 then float(v: r.shanon) / math.log(x: float(v: r.species)) 
-                else 1.0
-              }))
-            |> keep(columns: ["doi", "eveness_author"])
-        
-            aaa = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "author_location")
-              |> group(columns: ["doi", "author_location"])
-              |> distinct()
-              |> count()
-              |> keep(columns: ["doi", "_value"])
-              |> group()
-              |> rename(columns: {_value: "species"})
-            
-            fff = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "author_location")
-              |> group(columns: ["doi"])
-              |> count()
-              |> keep(columns: ["doi", "_value"])
-              |> group()
-              |> rename(columns: {_value: "total"})
-            
-            ccc = from(bucket: "trending")
-              |> range(start: _start)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "author_location")
-              |> duplicate(column: "_value", as: "author_location")
-              |> group(columns: ["doi", "author_location"])
-              |> count()
-              |> keep(columns: ["doi", "author_location", "_value"])
-              |> group()
-              |> rename(columns: {_value: "n"})
-            
-            ggg = join(
-              tables: {fff:fff, ccc:ccc},
-              on: ["doi"]
-            )
-              |> map(fn: (r) => ({ r with _value: -1.0 * float(v: r.n) / float(v: r.total)  * math.log(x: float(v: r.n) / float(v: r.total)) }))
-              |> group(columns: ["doi"])
-              |> sum()
-              |> group()
-              |> rename(columns: {_value: "shanon"})
-            
-            eee = join(
-              tables: {aaa:aaa, ggg:ggg},
-              on: ["doi"]
-            )
-            |> map(fn: (r) => ({ r with eveness_location: 
-                if r.species > 1 and r.shanon > 0 then float(v: r.shanon) / math.log(x: float(v: r.species)) 
-                else 1.0
-              }))
-            |> keep(columns: ["doi", "eveness_location"])
-        
-            nn = join(
-              tables: {eeee:eeee, ee:ee},
-              on: ["doi"]
-            )
-            nnn =  join(
-              tables: {nn:nn, eee:eee},
-              on: ["doi"]
-            )a
-            
-            join10 = join(
-              tables: {join9:join9, nnn:nnn},
-              on: ["doi"]
-            )
-            
-            join10
-              |> sort(columns: ["score"], desc: true)
-              |> yield(name: "join10")
-        '''
-    tables = query_api.query(query, params=p)
+                import "math"
+                import "experimental"
+                
+                _stop = now()                
+                baseTable = from(bucket: _bucket)
+                    |> range(start: _start, stop: _stop)
+                    |> filter(fn: (r) => r["_measurement"] == "trending")
+                    |> filter(fn: (r) => contains(value: r["doi"], set: _doi_list))
+                
+                windowTable = baseTable
+                    |> filter(fn: (r) => r["_field"] == "score")
+                    |> aggregateWindow(every: _window, fn: sum, createEmpty: true)
+                    |> sort(columns: ["_time"], desc: true)
+                    |> limit(n: _window_count)
+                    |> sort(columns: ["_time"])
+                    |> map(fn:(r) => ({
+                        r with _value:
+                        if exists r._value then r._value
+                        else 0.0
+                    }))
+                    |> keep(columns: ["_time", "_value", "doi"])
+                
+                stddev = windowTable
+                    |> stddev()
+                    |> group()
+                    |> keep(columns: ["_value", "doi"])
+                    |> rename(columns: {_value: "stddev"})
+                
+                ema = windowTable
+                    |> exponentialMovingAverage(n: _window_count)
+                    |> group()
+                    |> keep(columns: ["_value", "doi"])
+                    |> rename(columns: {_value: "ema"})
+                
+                j1 = join(
+                    tables: {stddev:stddev, ema:ema},
+                    on: ["doi"]
+                    )
+                
+                ker = windowTable
+                    |> kaufmansER(n: _window_count - 1)
+                    |> group()
+                    |> keep(columns: ["_value", "doi"])
+                    |> rename(columns: {_value: "ker"})
+                
+                j2 = join(
+                    tables: {j1:j1, ker:ker},
+                    on: ["doi"]
+                    )
+                
+                kama = windowTable
+                    |> kaufmansAMA(n: _window_count -1)
+                    |> group()
+                    |> keep(columns: ["_value", "doi"])
+                    |> rename(columns: {_value: "kama"})
+                
+                j3 = join(
+                    tables: {kama:kama, j2:j2},
+                    on: ["doi"]
+                    )
+                
+                mean = windowTable
+                    |> mean()
+                    |> group()
+                    |> keep(columns: ["_value", "doi"])
+                    |> rename(columns: {_value: "mean"})
+                
+                j5 = join(
+                    tables: {mean:mean, j3:j3},
+                    on: ["doi"]
+                    )
+                
+                prediction = windowTable
+                    |> holtWinters(n: 1,  seasonality: 0, interval: _window, withFit: false, timeColumn: "_time", column: "_value")
+                    |> group()
+                    |> keep(columns: ["_value", "doi"])
+                    |> rename(columns: {_value: "prediction"})
+                
+                j6 = join(
+                    tables: {prediction:prediction, j5:j5},
+                    on: ["doi"]
+                    )
+                
+                score = baseTable
+                  |> filter(fn: (r) => r["_field"] == "score")
+                  |> keep(columns: ["_value", "_time", "doi"])
+                  |> map(fn:(r) => ({ r with _value: float(v: r._value) * math.exp(x: _exponent * float(v: uint(v: now()) - uint(v: r._time)) / (10.0 ^ 9.0)) }))
+                  |> cumulativeSum(columns: ["_value"])
+                  |> last(column: "_value")
+                  |> keep(columns: ["_value", "doi"])
+                  |> group()
+                  |> rename(columns: {_value: "score"})
+                
+                j7 = join(
+                  tables: {j6:j6, score:score},
+                  on: ["doi"]
+                )
+                
+                a = baseTable
+                  |> filter(fn: (r) => r["_field"] == "followers")
+                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                  |> sum()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "sum_followers"})
+                
+                b = baseTable
+                  |> filter(fn: (r) => r["_field"] == "sentiment_raw")
+                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                  |> median()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "median_sentiment"})
+                
+                c = baseTable
+                  |> filter(fn: (r) => r["_field"] == "contains_abstract_raw")
+                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                  |> median()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "contains_abstract_raw"})
+                
+                ad = baseTable
+                  |> filter(fn: (r) => r["_field"] == "questions")
+                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                  |> experimental.mean()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "questions"})
+                
+                e = baseTable
+                  |> filter(fn: (r) => r["_field"] == "exclamations")
+                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                  |> experimental.mean()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "exclamations"})
+                
+                f = baseTable
+                  |> filter(fn: (r) => r["_field"] == "length")
+                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                  |> median()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "length"})
+                
+                g = baseTable
+                  |> filter(fn: (r) => r["_field"] == "length")
+                  |> map(fn: (r) => ({r with _value: math.round(x: float(v: uint(v: now()) - uint(v: r._time)) / (10.0 ^ 9.0)) }))
+                  |> median()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "median_age"})
+                
+                j = baseTable
+                  |> filter(fn: (r) => r["_field"] == "length")
+                  |> count()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "count"})
+                
+                jk = baseTable
+                  |> filter(fn: (r) => r["_field"] == "bot_rating")
+                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                  |> experimental.mean()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "mean_bot_rating"})
+                
+                join1 = join(
+                  tables: {a:a, b:b},
+                  on: ["doi"]
+                )
+                
+                join2 = join(
+                  tables: {join1:join1, c:c},
+                  on: ["doi"]
+                )
+                
+                join3 = join(
+                  tables: {join2:join2, ad:ad},
+                  on: ["doi"]
+                )
+                
+                join4 = join(
+                  tables: {join3:join3, e:e},
+                  on: ["doi"]
+                )
+                
+                join46 = join(
+                  tables: {join4:join4, j:j},
+                  on: ["doi"]
+                )
+                
+                join5 = join(
+                  tables: {join46:join46, f:f},
+                  on: ["doi"]
+                )
+                
+                join6 = join(
+                  tables: {join5:join5, g:g},
+                  on: ["doi"]
+                )
+                
+                join68 = join(
+                  tables: {join6:join6, jk:jk},
+                  on: ["doi"]
+                )
+                
+                join9 = join(
+                    tables: {join68:join68, j7:j7},
+                    on: ["doi"]
+                )
+                
+                aaaa = baseTable
+                    |> filter(fn: (r) => r["_field"] == "lang")
+                    |> group(columns: ["doi", "language"])
+                    |> distinct()
+                    |> count()
+                    |> keep(columns: ["doi", "_value"])
+                    |> group()
+                    |> rename(columns: {_value: "species"})
+                
+                ffff = baseTable
+                    |> filter(fn: (r) => r["_field"] == "lang")
+                    |> group(columns: ["doi"])
+                    |> count()
+                    |> keep(columns: ["doi", "_value"])
+                    |> group()
+                    |> rename(columns: {_value: "total"})
+                
+                cccc = baseTable
+                    |> filter(fn: (r) => r["_field"] == "lang")
+                    |> duplicate(column: "_value", as: "language")
+                    |> group(columns: ["doi", "language"])
+                    |> count()
+                    |> keep(columns: ["doi", "language", "_value"])
+                    |> group()
+                    |> rename(columns: {_value: "n"})
+                
+                gggg = join(
+                  tables: {ffff:ffff, cccc:cccc},
+                  on: ["doi"]
+                )
+                    |> map(fn: (r) => ({ r with _value: -1.0 * float(v: r.n) / float(v: r.total)  * math.log(x: float(v: r.n) / float(v: r.total)) }))
+                    |> group(columns: ["doi"])
+                    |> sum()
+                    |> group()
+                    |> rename(columns: {_value: "shanon"})
+                
+                eeee = join(
+                  tables: {aaaa:aaaa, gggg:gggg},
+                  on: ["doi"]
+                )
+                    |> map(fn: (r) => ({ r with evenness_lang:
+                        if r.species > 1 and r.shanon > 0 then float(v: r.shanon) / math.log(x: float(v: r.species))
+                        else 1.0
+                      }))
+                    |> keep(columns: ["doi", "evenness_lang"])
+                
+                
+                aa = baseTable
+                    |> filter(fn: (r) => r["_field"] == "author_name")
+                    |> group(columns: ["doi", "author_name"])
+                    |> distinct()
+                    |> count()
+                    |> keep(columns: ["doi", "_value"])
+                    |> group()
+                    |> rename(columns: {_value: "species"})
+                
+                ff = baseTable
+                    |> filter(fn: (r) => r["_field"] == "author_name")
+                    |> group(columns: ["doi"])
+                    |> count()
+                    |> keep(columns: ["doi", "_value"])
+                    |> group()
+                    |> rename(columns: {_value: "total"})
+                
+                cc = baseTable
+                    |> filter(fn: (r) => r["_field"] == "author_name")
+                    |> duplicate(column: "_value", as: "author_name")
+                    |> group(columns: ["doi", "author_name"])
+                    |> count()
+                    |> keep(columns: ["doi", "author_name", "_value"])
+                    |> group()
+                    |> rename(columns: {_value: "n"})
+                
+                gg = join(
+                  tables: {ff:ff, cc:cc},
+                  on: ["doi"]
+                )
+                    |> map(fn: (r) => ({ r with _value: -1.0 * float(v: r.n) / float(v: r.total)  * math.log(x: float(v: r.n) / float(v: r.total)) }))
+                    |> group(columns: ["doi"])
+                    |> sum()
+                    |> group()
+                    |> rename(columns: {_value: "shanon"})
+                
+                ee = join(
+                  tables: {aa:aa, gg:gg},
+                  on: ["doi"]
+                )
+                    |> map(fn: (r) => ({ r with evenness_author:
+                        if r.species > 1 and r.shanon > 0 then float(v: r.shanon) / math.log(x: float(v: r.species))
+                        else 1.0
+                      }))
+                    |> keep(columns: ["doi", "evenness_author"])
+                
+                aaa = baseTable
+                    |> filter(fn: (r) => r["_field"] == "author_location")
+                    |> group(columns: ["doi", "author_location"])
+                    |> distinct()
+                    |> count()
+                    |> keep(columns: ["doi", "_value"])
+                    |> group()
+                    |> rename(columns: {_value: "species"})
+                
+                fff = baseTable
+                    |> filter(fn: (r) => r["_field"] == "author_location")
+                    |> group(columns: ["doi"])
+                    |> count()
+                    |> keep(columns: ["doi", "_value"])
+                    |> group()
+                    |> rename(columns: {_value: "total"})
+                
+                ccc = baseTable
+                    |> filter(fn: (r) => r["_field"] == "author_location")
+                    |> duplicate(column: "_value", as: "author_location")
+                    |> group(columns: ["doi", "author_location"])
+                    |> count()
+                    |> keep(columns: ["doi", "author_location", "_value"])
+                    |> group()
+                    |> rename(columns: {_value: "n"})
+                
+                ggg = join(
+                  tables: {fff:fff, ccc:ccc},
+                  on: ["doi"]
+                )
+                    |> map(fn: (r) => ({ r with _value: -1.0 * float(v: r.n) / float(v: r.total)  * math.log(x: float(v: r.n) / float(v: r.total)) }))
+                    |> group(columns: ["doi"])
+                    |> sum()
+                    |> group()
+                    |> rename(columns: {_value: "shanon"})
+                
+                eee = join(
+                  tables: {aaa:aaa, ggg:ggg},
+                  on: ["doi"]
+                )
+                    |> map(fn: (r) => ({ r with evenness_location:
+                        if r.species > 1 and r.shanon > 0 then float(v: r.shanon) / math.log(x: float(v: r.species))
+                        else 1.0
+                      }))
+                    |> keep(columns: ["doi", "evenness_location"])
+                
+                nn = join(
+                  tables: {eeee:eeee, ee:ee},
+                  on: ["doi"]
+                )
+                
+                nnn =  join(
+                  tables: {nn:nn, eee:eee},
+                  on: ["doi"]
+                )
+                
+                join10 = join(
+                  tables: {join9:join9, nnn:nnn},
+                  on: ["doi"]
+                )
+                  |> sort(columns: ["score"], desc: true)
+                  |> yield(name: "join10")
 
+        '''
+    a = time.time()
+    tables = query_api.query(query, params=p)
+    print(time.time() - a)
+
+    print('done pubs')
     session_factory = sessionmaker(bind=DAO.engine)
     Session = scoped_session(session_factory)
     session = Session()
 
-    # trending_objects = []
+    frames = get_dataframes(trending)
+    trend = calculate_trend(frames)
+
+    print('done trends')
+
+    delete_trending_table(session, abs(trending['duration'].total_seconds()))
+
+    trending_objects = []
     for table in tables:
-        # print(table)
         for record in table.records:
-            pc = record['prediction'] / record['window_median']
             t_obj = Trending(publication_doi=record['doi'], duration=abs(trending['duration'].total_seconds()),
                              score=record['score'], count=record['count'],
                              median_sentiment=record['median_sentiment'],
                              sum_follower=record['sum_followers'],
                              median_age=record['median_age'],
                              median_length=record['length'],
-                             avg_questions=record['questions'],
-                             avg_exclamations=record['exclamations'],
+                             mean_questions=record['questions'],
+                             mean_exclamations=record['exclamations'],
                              abstract_difference=record['contains_abstract_raw'],
-                             location_diversity=record['eveness_location'],
-                             tweet_author_diversity=record['eveness_author'],
-                             lan_diversity=record['eveness_lang'],
-                             projected_change=pc)
+                             mean_bot_rating=record['mean_bot_rating'],
+                             ema=record['ema'],
+                             kama=record['kama'],
+                             ker=record['ker'],
+                             mean_score=record['mean'],
+                             stddev=record['stddev'],
+                             trending=trend[record['doi']],
+                             projected_change=record['prediction'])
+
             t_obj = save_or_update(session, t_obj, Trending,
-                                   {'publication_doi': t_obj.publication_doi, 'duration': t_obj.duration})
-            # trending_objects.append(t_obj)
+                                {'publication_doi': t_obj.publication_doi, 'duration': t_obj.duration})
+            trending_objects.append(t_obj)
+    return trending_objects
+
+
+def delete_trending_table(session, duration):
+    query = """
+            DELETE FROM trending
+                WHERE duration=:duration;
+            """
+    params = {'duration': duration, }
+    s = text(query)
+    s = s.bindparams(bindparam('duration'))
+    return session.execute(s, params)
 
 
 def save_or_update(session, obj, table, kwargs):
@@ -620,17 +790,12 @@ def save_data_to_influx(data):
         },
         "fields": {
             "score": score,
-            "time_score": float(data['subj']['processed']['time_score']),
-            "type_score": data['subj']['processed']['type_score'],
             "lang": data['subj']['data']['lang'],
             "contains_abstract_raw": float(
                 data['subj']['processed']['contains_abstract_raw']) if 'contains_abstract_raw' in data['subj'][
                 'processed'] else 0.0,
-            "contains_abstract": data['subj']['processed']['contains_abstract'],
             "sentiment_raw": float(data['subj']['processed']['sentiment_raw']),
-            "sentiment": data['subj']['processed']['sentiment'],
             "followers": data['subj']['processed']['followers'],
-            "type": data['subj']['processed']['tweet_type'],
             "length": data['subj']['processed']['length'],
             "questions": data['subj']['processed']['question_mark_count'],
             "exclamations": data['subj']['processed']['exclamation_mark_count'],
@@ -640,149 +805,8 @@ def save_data_to_influx(data):
         },
         "time": createdAt}
 
-    # print(point)
+    print(point)
     write_api.write('trending', org, [point])
-
-    downsample = """
-    
-            // Task Options
-            option task = {
-              name: "trending-1w",
-              every: 1w,
-            }
-            
-            // Defines a data source
-            data = from(bucket: "system-data")
-              |> range(start: -duration(v: int(v: task.every) * 2))
-              |> filter(fn: (r) => r._measurement == "mem")
-            
-            data
-              // Windows and aggregates the data in to 1h averages
-              |> aggregateWindow(fn: mean, every: 1h)
-              // Stores the aggregated data in a new bucket
-              |> to(bucket: "system-data-downsampled", org: "my-org")
-
-    
-                from(bucket: "trending")
-              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-              |> filter(fn: (r) => r["doi"] == "10.1136/bmj.n2211")
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "lang")
-              |> duplicate(column: "_value", as: "language")
-              |> group(columns: ["language"])
-              |> count()
-              
-              
-    """
-
-    # sentiment_raw, score, contains_abstract
-    average_score = """
-        median = from(bucket: "trending")
-          |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-          |> filter(fn: (r) => r["_measurement"] == "trending")
-          |> filter(fn: (r) => r["_field"] == "score")
-          |> keep(columns: ["_value"])
-          |> group()
-          |> median()
-          |> set(key: "name", value: "median")
-          |> group(columns: ["name"])
-        
-        min = from(bucket: "trending")
-          |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-          |> filter(fn: (r) => r["_measurement"] == "trending")
-          |> filter(fn: (r) => r["_field"] == "score")
-          |> keep(columns: ["_value"])
-          |> group()
-          |> min()
-          |> set(key: "name", value: "min")
-          |> group(columns: ["name"])
-        
-        max = from(bucket: "trending")
-          |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-          |> filter(fn: (r) => r["_measurement"] == "trending")
-          |> filter(fn: (r) => r["_field"] == "score")  
-          |> keep(columns: ["_value"])
-          |> group()
-          |> max()
-          |> set(key: "name", value: "max")
-          |> group(columns: ["name"])
-        
-        union(tables: [median, min, max])
-        
-        # followers(log result?), length
-        median = from(bucket: "trending")
-          |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-          |> filter(fn: (r) => r["_measurement"] == "trending")
-          |> filter(fn: (r) => r["_field"] == "length")
-          |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-          |> keep(columns: ["_value"])
-          |> group()
-          |> median()
-          |> set(key: "name", value: "median")
-          |> group(columns: ["name"])
-        
-        min = from(bucket: "trending")
-          |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-          |> filter(fn: (r) => r["_measurement"] == "trending")
-          |> filter(fn: (r) => r["_field"] == "length")
-          |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-          |> keep(columns: ["_value"])
-          |> group()
-          |> min()
-          |> set(key: "name", value: "min")
-          |> group(columns: ["name"])
-        
-        max = from(bucket: "trending")
-          |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-          |> filter(fn: (r) => r["_measurement"] == "trending")
-          |> filter(fn: (r) => r["_field"] == "length")  
-          |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-          |> keep(columns: ["_value"])
-          |> group()
-          |> max()
-          |> set(key: "name", value: "max")
-          |> group(columns: ["name"])
-        
-        
-        union(tables: [median, min, max])
-        
-        # exclamations, questions
-         mean = from(bucket: "trending")
-          |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-          |> filter(fn: (r) => r["_measurement"] == "trending")
-          |> filter(fn: (r) => r["_field"] == "questions")
-          |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-          |> keep(columns: ["_value"])
-          |> group()
-          |> mean()
-          |> set(key: "name", value: "mean")
-          |> group(columns: ["name"])
-        
-        min = from(bucket: "trending")
-          |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-          |> filter(fn: (r) => r["_measurement"] == "trending")
-          |> filter(fn: (r) => r["_field"] == "questions")
-          |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-          |> keep(columns: ["_value"])
-          |> group()
-          |> min()
-          |> set(key: "name", value: "min")
-          |> group(columns: ["name"])
-        
-        max = from(bucket: "trending")
-          |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-          |> filter(fn: (r) => r["_measurement"] == "trending")
-          |> filter(fn: (r) => r["_field"] == "questions")  
-          |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-          |> keep(columns: ["_value"])
-          |> group()
-          |> max()
-          |> set(key: "name", value: "max")
-          |> group(columns: ["name"])
-        
-        
-        union(tables: [mean, min, max])
-    """
 
 
 # sink=[aggregated_topic]
@@ -799,169 +823,3 @@ async def aggregate(events):
 
 if __name__ == '__main__':
     app.main()
-
-    something = """
-    // author_location, author_name
-     from(bucket: "trending")
-      |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-      |> filter(fn: (r) => r["_measurement"] == "trending")
-      |> filter(fn: (r) => r["_field"] == "lang")
-      |> duplicate(column: "_value", as: "language")
-      |> group(columns: ["language"])
-      |> count()
-    
-    
-     a = from(bucket: "trending")
-      |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-      |> filter(fn: (r) => r["_measurement"] == "trending")
-      |> filter(fn: (r) => r["_field"] == "lang")
-      |> keep(columns: ["_value"])
-      |> group()
-      |> count()
-      |> set(key: "language", value: "total")
-    
-      //|> group(columns: ["language"])
-    b = from(bucket: "trending")
-      |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-      |> filter(fn: (r) => r["_measurement"] == "trending")
-      |> filter(fn: (r) => r["_field"] == "lang")
-      |> duplicate(column: "_value", as: "language")
-      |> group(columns: ["language"])
-      |> count()
-    
-    union(tables: [a,b])
-    """
-
-    # last is about 11%
-    exp = {
-        "hour": -0.0006,
-        "day": -0.000025,
-        "week": -0.00000357142857,
-        "month": -0.000000833333333,
-    }
-
-    calculate_trending_score = """
-        import "math"
-        from(bucket: "trending")
-          |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-          |> filter(fn: (r) => r["_measurement"] == "trending")
-          |> filter(fn: (r) => r["_field"] == "score")
-          |> keep(columns: ["_value", "_time", "doi"])
-          |> map(fn:(r) => ({ r with _value: float(v: r._value) * math.exp(x: -0.0000000000006*float(v: uint(v: now()) - uint(v: r._time))) }))
-          |> cumulativeSum(columns: ["_value"])
-          |> last(column: "_value")
-          |> keep(columns: ["_value", "doi"])
-          |> group(columns: ["_value", "doi"])
-          |> sort(columns: ["_value"], desc: true)
-    """
-
-    window_size = {
-        "hour": timedelta(minutes=6),
-        "day": timedelta(minutes=144),
-        "week": timedelta(minutes=1008),
-        "month": timedelta(minutes=4320),
-    }
-    # slow
-    predict_score = """
-        import "math"
-        from(bucket: "trending")
-          |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-          |> filter(fn: (r) => r["_measurement"] == "trending")
-          |> filter(fn: (r) => r["_field"] == "score")
-          |> aggregateWindow(every: 6m, fn: sum, createEmpty: true)
-          |> cumulativeSum(columns: ["_value"])
-          |> holtWinters(n: 1,  seasonality: 0, interval: 6m, withFit: false, timeColumn: "_time", column: "_value")
-          |> group()
-          |> sort(desc: true)
-    """
-
-    median_sentiment = """
-        from(bucket: "trending")
-          |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-          |> filter(fn: (r) => r["_measurement"] == "trending")
-          |> filter(fn: (r) => r["_field"] == "sentiment_raw")
-          |> filter(fn: (r) => r["doi"] == "10.1001/jama.2021.1031")
-          |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-          |> keep(columns: ["_value"])
-          |> group()
-          |> median()
-    """
-
-    ## wrong place
-    median_follower_sum = """
-        from(bucket: "trending")
-          |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-          |> filter(fn: (r) => r["_measurement"] == "trending")
-          |> filter(fn: (r) => r["_field"] == "followers")
-          |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-          |> sum()
-          |> group()
-          |> median()
-      """
-
-    median_follower_sum = """
-            from(bucket: "trending")
-              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "followers")
-              |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-              |> sum()
-              |> median()
-          """
-
-    shanon_eveness = """
-        import "math"
-            a = from(bucket: "trending")
-              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "lang")
-              |> group(columns: ["doi", "language"])
-              |> distinct()
-              |> count()
-              |> keep(columns: ["doi", "_value"])
-              |> group()
-              |> rename(columns: {_value: "species"})
-            
-            f = from(bucket: "trending")
-              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "lang")
-              |> group(columns: ["doi"])
-              |> count()
-              |> keep(columns: ["doi", "_value"])
-              |> group()
-              |> rename(columns: {_value: "total"})
-            
-            c = from(bucket: "trending")
-              |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-              |> filter(fn: (r) => r["_measurement"] == "trending")
-              |> filter(fn: (r) => r["_field"] == "lang")
-              |> duplicate(column: "_value", as: "language")
-              |> group(columns: ["doi", "language"])
-              |> count()
-              |> keep(columns: ["doi", "language", "_value"])
-              |> group()
-              |> rename(columns: {_value: "n"})
-            
-            g = join(
-              tables: {f:f, c:c},
-              on: ["doi"]
-            )
-              |> map(fn: (r) => ({ r with _value: -1.0 * float(v: r.n) / float(v: r.total)  * math.log(x: float(v: r.n) / float(v: r.total)) }))
-              |> group(columns: ["doi"])
-              |> sum()
-              |> group()
-              |> rename(columns: {_value: "shanon"})
-            
-            e = join(
-              tables: {a:a, g:g},
-              on: ["doi"]
-            )
-            
-            e |> map(fn: (r) => ({ r with eveness: 
-                if r.species > 1 then float(v: r.shanon) / math.log(x: float(v: r.species)) 
-                else 1.0
-              }))
-              |> keep(columns: ["doi", "eveness"])
-              |> yield(name: "e")
-      """
