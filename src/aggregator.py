@@ -57,16 +57,17 @@ trending_time_definition = {
         'name': 'now',
         'bucket': 'trending',
         'duration': timedelta(hours=-6),
-        'trending_interval': timedelta(minutes=3),
-        'time_exponent': -0.00036,
-        'window_size': timedelta(minutes=6),
-        'min_count': 20,
-        'window_count': 40,
+        'trending_interval': timedelta(minutes=3),  # 100 times in interval? duration(min) / 100
+        'time_exponent': -0.00036,  # base value for one hour -> -0.0006 * duration(hours)
+        'window_size': timedelta(minutes=6),  # 60? so we don't need window count?
+        'window_count': 60,  # from window size or "fixed"
+        'min_count': 20,  #  n per hour?
     },
     'today': {
         'name': 'today',
         'bucket': 'trending',
         'duration': timedelta(hours=-24),
+
         'trending_interval': timedelta(minutes=60),
         'time_exponent': -0.000025,
         'window_size': timedelta(minutes=24),
@@ -84,6 +85,26 @@ trending_time_definition = {
         'window_count': 60,
     },
     'month': {
+        'name': 'month',
+        'bucket': 'trending',
+        'duration': timedelta(days=-30),
+        'trending_interval': timedelta(hours=12),
+        'time_exponent': -0.000000833333333,
+        'window_size': timedelta(minutes=720),
+        'min_count': 500,
+        'window_count': 60,
+    },
+    'year': {
+        'name': 'month',
+        'bucket': 'trending',
+        'duration': timedelta(days=-30),
+        'trending_interval': timedelta(hours=12),
+        'time_exponent': -0.000000833333333,
+        'window_size': timedelta(minutes=720),
+        'min_count': 500,
+        'window_count': 60,
+    },
+    'history': {
         'name': 'month',
         'bucket': 'trending',
         'duration': timedelta(days=-30),
@@ -555,160 +576,6 @@ def get_base_trend_table(trending):
                     tables: {join68:join68, j7:j7},
                     on: ["doi"]
                 )
-                
-                aaaa = baseTable
-                    |> filter(fn: (r) => r["_field"] == "lang")
-                    |> group(columns: ["doi", "language"])
-                    |> distinct()
-                    |> count()
-                    |> keep(columns: ["doi", "_value"])
-                    |> group()
-                    |> rename(columns: {_value: "species"})
-                
-                ffff = baseTable
-                    |> filter(fn: (r) => r["_field"] == "lang")
-                    |> group(columns: ["doi"])
-                    |> count()
-                    |> keep(columns: ["doi", "_value"])
-                    |> group()
-                    |> rename(columns: {_value: "total"})
-                
-                cccc = baseTable
-                    |> filter(fn: (r) => r["_field"] == "lang")
-                    |> duplicate(column: "_value", as: "language")
-                    |> group(columns: ["doi", "language"])
-                    |> count()
-                    |> keep(columns: ["doi", "language", "_value"])
-                    |> group()
-                    |> rename(columns: {_value: "n"})
-                
-                gggg = join(
-                  tables: {ffff:ffff, cccc:cccc},
-                  on: ["doi"]
-                )
-                    |> map(fn: (r) => ({ r with _value: -1.0 * float(v: r.n) / float(v: r.total)  * math.log(x: float(v: r.n) / float(v: r.total)) }))
-                    |> group(columns: ["doi"])
-                    |> sum()
-                    |> group()
-                    |> rename(columns: {_value: "shanon"})
-                
-                eeee = join(
-                  tables: {aaaa:aaaa, gggg:gggg},
-                  on: ["doi"]
-                )
-                    |> map(fn: (r) => ({ r with evenness_lang:
-                        if r.species > 1 and r.shanon > 0 then float(v: r.shanon) / math.log(x: float(v: r.species))
-                        else 1.0
-                      }))
-                    |> keep(columns: ["doi", "evenness_lang"])
-                
-                
-                aa = baseTable
-                    |> filter(fn: (r) => r["_field"] == "author_name")
-                    |> group(columns: ["doi", "author_name"])
-                    |> distinct()
-                    |> count()
-                    |> keep(columns: ["doi", "_value"])
-                    |> group()
-                    |> rename(columns: {_value: "species"})
-                
-                ff = baseTable
-                    |> filter(fn: (r) => r["_field"] == "author_name")
-                    |> group(columns: ["doi"])
-                    |> count()
-                    |> keep(columns: ["doi", "_value"])
-                    |> group()
-                    |> rename(columns: {_value: "total"})
-                
-                cc = baseTable
-                    |> filter(fn: (r) => r["_field"] == "author_name")
-                    |> duplicate(column: "_value", as: "author_name")
-                    |> group(columns: ["doi", "author_name"])
-                    |> count()
-                    |> keep(columns: ["doi", "author_name", "_value"])
-                    |> group()
-                    |> rename(columns: {_value: "n"})
-                
-                gg = join(
-                  tables: {ff:ff, cc:cc},
-                  on: ["doi"]
-                )
-                    |> map(fn: (r) => ({ r with _value: -1.0 * float(v: r.n) / float(v: r.total)  * math.log(x: float(v: r.n) / float(v: r.total)) }))
-                    |> group(columns: ["doi"])
-                    |> sum()
-                    |> group()
-                    |> rename(columns: {_value: "shanon"})
-                
-                ee = join(
-                  tables: {aa:aa, gg:gg},
-                  on: ["doi"]
-                )
-                    |> map(fn: (r) => ({ r with evenness_author:
-                        if r.species > 1 and r.shanon > 0 then float(v: r.shanon) / math.log(x: float(v: r.species))
-                        else 1.0
-                      }))
-                    |> keep(columns: ["doi", "evenness_author"])
-                
-                aaa = baseTable
-                    |> filter(fn: (r) => r["_field"] == "author_location")
-                    |> group(columns: ["doi", "author_location"])
-                    |> distinct()
-                    |> count()
-                    |> keep(columns: ["doi", "_value"])
-                    |> group()
-                    |> rename(columns: {_value: "species"})
-                
-                fff = baseTable
-                    |> filter(fn: (r) => r["_field"] == "author_location")
-                    |> group(columns: ["doi"])
-                    |> count()
-                    |> keep(columns: ["doi", "_value"])
-                    |> group()
-                    |> rename(columns: {_value: "total"})
-                
-                ccc = baseTable
-                    |> filter(fn: (r) => r["_field"] == "author_location")
-                    |> duplicate(column: "_value", as: "author_location")
-                    |> group(columns: ["doi", "author_location"])
-                    |> count()
-                    |> keep(columns: ["doi", "author_location", "_value"])
-                    |> group()
-                    |> rename(columns: {_value: "n"})
-                
-                ggg = join(
-                  tables: {fff:fff, ccc:ccc},
-                  on: ["doi"]
-                )
-                    |> map(fn: (r) => ({ r with _value: -1.0 * float(v: r.n) / float(v: r.total)  * math.log(x: float(v: r.n) / float(v: r.total)) }))
-                    |> group(columns: ["doi"])
-                    |> sum()
-                    |> group()
-                    |> rename(columns: {_value: "shanon"})
-                
-                eee = join(
-                  tables: {aaa:aaa, ggg:ggg},
-                  on: ["doi"]
-                )
-                    |> map(fn: (r) => ({ r with evenness_location:
-                        if r.species > 1 and r.shanon > 0 then float(v: r.shanon) / math.log(x: float(v: r.species))
-                        else 1.0
-                      }))
-                    |> keep(columns: ["doi", "evenness_location"])
-                
-                nn = join(
-                  tables: {eeee:eeee, ee:ee},
-                  on: ["doi"]
-                )
-                
-                nnn =  join(
-                  tables: {nn:nn, eee:eee},
-                  on: ["doi"]
-                )
-                
-                join10 = join(
-                  tables: {join9:join9, nnn:nnn},
-                  on: ["doi"]
-                )
                   |> sort(columns: ["score"], desc: true)
                   |> yield(name: "join10")
 
@@ -790,7 +657,6 @@ def save_data_to_influx(data):
         },
         "fields": {
             "score": score,
-            "lang": data['subj']['data']['lang'],
             "contains_abstract_raw": float(
                 data['subj']['processed']['contains_abstract_raw']) if 'contains_abstract_raw' in data['subj'][
                 'processed'] else 0.0,
@@ -800,8 +666,6 @@ def save_data_to_influx(data):
             "questions": data['subj']['processed']['question_mark_count'],
             "exclamations": data['subj']['processed']['exclamation_mark_count'],
             "bot_rating": data['subj']['processed']['bot_rating'],
-            "author_name": data['subj']['processed']['name'],
-            "author_location": data['subj']['processed']['location'],
         },
         "time": createdAt}
 
