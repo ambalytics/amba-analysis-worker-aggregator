@@ -4,14 +4,14 @@ import os
 import time
 import types
 import uuid
-from datetime import timedelta
+from datetime import timedelta, datetime
 from heapq import heappop
 from typing import cast
 from influxdb_client.client.write_api import ASYNCHRONOUS
 import asyncio
 from event_stream import dao
 from event_stream.models.model import *
-from influxdb_client import InfluxDBClient, BucketRetentionRules
+from influxdb_client import InfluxDBClient, BucketRetentionRules, Task
 from sqlalchemy.orm import sessionmaker, scoped_session
 import pandas as pd
 import pymannkendall as mk
@@ -40,80 +40,85 @@ client = InfluxDBClient.from_env_properties()
 write_api = client.write_api(write_options=ASYNCHRONOUS)
 query_api = client.query_api()
 
-bucket_definition = [
-    {
-        'name': 'trending',
-        'retention': timedelta(days=30),
-        'downsample_bucket': None,
-    }, {
-        'name': 'history',
-        'retention': None,
-        'downsample_bucket': timedelta(hours=1),
-    },
-]
-
 trending_time_definition = {
-    'now': {
-        'name': 'now',
-        'bucket': 'trending',
+    'currently': {
+        'name': 'currently',
+        'trending_bucket': 'trending_currently',
         'duration': timedelta(hours=-6),
-        'trending_interval': timedelta(minutes=3),  # 100 times in interval? duration(min) / 100
-        'time_exponent': -0.00036,  # base value for one hour -> -0.0006 * duration(hours)
-        'window_size': timedelta(minutes=6),  # 60? so we don't need window count?
-        'window_count': 60,  # from window size or "fixed"
-        'min_count': 20,  #  n per hour?
+        'retention': timedelta(hours=7),
+        'trending_interval': timedelta(minutes=3),
+        'time_exponent': -0.00036,
+        'window_size': timedelta(minutes=6),
+        'window_count': 60,
+        'min_count': 15,
+        'downsample_bucket': 'today',
+        'downsample_window': timedelta(minutes=1)
     },
     'today': {
         'name': 'today',
-        'bucket': 'trending',
+        'trending_bucket': 'trending_today',
         'duration': timedelta(hours=-24),
-
+        'retention': timedelta(hours=25),
         'trending_interval': timedelta(minutes=60),
         'time_exponent': -0.000025,
         'window_size': timedelta(minutes=24),
-        'min_count': 80,
+        'min_count': 15,
         'window_count': 60,
+        'downsample_bucket': 'week',
+        'downsample_window': timedelta(minutes=6)
     },
     'week': {
         'name': 'week',
-        'bucket': 'trending',
+        'trending_bucket': 'trending_week',
         'duration': timedelta(days=-7),
+        'retention': timedelta(days=7, hours=1),
         'trending_interval': timedelta(hours=6),
         'time_exponent': -0.00000357142857,
         'window_size': timedelta(minutes=168),
-        'min_count': 200,
+        'min_count': 15,
         'window_count': 60,
+        'downsample_bucket': 'month',
+        'downsample_window': timedelta(minutes=42)
     },
     'month': {
         'name': 'month',
-        'bucket': 'trending',
+        'trending_bucket': 'trending_month',
         'duration': timedelta(days=-30),
-        'trending_interval': timedelta(hours=12),
+        'retention': timedelta(days=30, hours=1),
+        'trending_interval': timedelta(hours=8),
         'time_exponent': -0.000000833333333,
         'window_size': timedelta(minutes=720),
-        'min_count': 500,
+        'min_count': 15,
         'window_count': 60,
+        'downsample_bucket': 'year',
+        'downsample_window': timedelta(minutes=360)
     },
     'year': {
-        'name': 'month',
-        'bucket': 'trending',
-        'duration': timedelta(days=-30),
-        'trending_interval': timedelta(hours=12),
+        'name': 'year',
+        'trending_bucket': 'trending_year',
+        'duration': timedelta(days=-365),
+        'retention': timedelta(days=365, hours=1),
+        'trending_interval': timedelta(hours=24),
         'time_exponent': -0.000000833333333,
-        'window_size': timedelta(minutes=720),
-        'min_count': 500,
+        'window_size': timedelta(minutes=8760),
+        'min_count': 15,
         'window_count': 60,
+        'downsample_bucket': 'history',
+        'downsample_window': timedelta(minutes=1440)
     },
-    'history': {
-        'name': 'month',
-        'bucket': 'trending',
-        'duration': timedelta(days=-30),
-        'trending_interval': timedelta(hours=12),
-        'time_exponent': -0.000000833333333,
-        'window_size': timedelta(minutes=720),
-        'min_count': 500,
-        'window_count': 60,
-    }
+    # 'history': {
+    #     'name': 'history',
+    #     'trending_bucket': 'trending_history',
+    #     'duration': None,  # todo use date?
+    #     'retention': None,
+    #     'trending_interval': timedelta(hours=12),
+    #     'time_exponent': -0.000000833333333,
+    #     'window_size': timedelta(minutes=720),  # todo?
+    #     'min_count': 15,
+    #     'window_count': 60,
+    #     'downsample_bucket': None,
+    #     'downsample_window': None
+    # }
 }
 
 
@@ -121,137 +126,147 @@ trending_time_definition = {
 async def init_influx():
     buckets_api = client.buckets_api()
     buckets = buckets_api.find_buckets().buckets
-    for td in bucket_definition:
-        exist = False
-        for b in buckets:
-            if b.name == td['name']:
-                exist = True
-        if not exist:
-            if td['retention']:
-                retention_rules = BucketRetentionRules(type="expire",
-                                                       every_seconds=int(td['retention'].total_seconds()))
-                created_bucket = buckets_api.create_bucket(bucket_name=td['name'],
-                                                           retention_rules=retention_rules, org=org)
-            else:
-                created_bucket = buckets_api.create_bucket(bucket_name=td['name'], org=org)
-
-    # https://influxdb-client.readthedocs.io/en/stable/api.html#tasksapi
 
     org_api = client.organizations_api()
     org_obj = org_api.find_organizations(org=org)[0]
 
     tasks_api = client.tasks_api()
-    task = """
-        _window = 1h
-        
-        baseTable = from(bucket: "trending")
-          |> range(start: -6h, stop: now())
-          |> filter(fn: (r) => r["_measurement"] == "trending")
-        
-        a = baseTable
-          |> filter(fn: (r) => r["_field"] == "followers")
-          |> aggregateWindow(fn: sum, every: _window, createEmpty: false)
-          |> group()
-          |> keep(columns: ["_value", "_time", "doi"])
-          |> rename(columns: {_value: "sum_followers"})
-        
-        b = baseTable
-          |> filter(fn: (r) => r["_field"] == "sentiment_raw")
-          |> aggregateWindow(fn: median, every: _window, createEmpty: false)
-          |> group()
-          |> keep(columns: ["_value", "_time", "doi"])
-          |> rename(columns: {_value: "median_sentiment"})
-        
-        join1 = join(
-          tables: {a:a, b:b},
-          on: ["doi", "_time"]
-        )
-          |> map(fn: (r) => ({r with _time: uint(v: r._time)}))
-        
-        c = baseTable
-          |> filter(fn: (r) => r["_field"] == "contains_abstract_raw")
-          |> aggregateWindow(fn: median, every: _window, createEmpty: false)
-          |> group()
-          |> keep(columns: ["_value", "_time", "doi"])
-          |> map(fn: (r) => ({r with _time: uint(v: r._time)}))
-          |> rename(columns: {_value: "contains_abstract_raw"})
-        
-        join2 = join(
-          tables: {join1:join1, c:c},
-          on: ["doi", "_time"]
-        )
-        
-        ad = baseTable
-          |> filter(fn: (r) => r["_field"] == "questions")
-          |> aggregateWindow(fn: mean, every: _window, createEmpty: false)
-          |> group()
-          |> keep(columns: ["_value", "_time", "doi"])
-          |> map(fn: (r) => ({r with _time: uint(v: r._time)}))
-          |> rename(columns: {_value: "questions"})
-        
-        join3 = join(
-          tables: {join2:join2, ad:ad},
-          on: ["doi", "_time"]
-        )
-        
-        e = baseTable
-          |> filter(fn: (r) => r["_field"] == "exclamations")
-          |> aggregateWindow(fn: mean, every: _window, createEmpty: false)
-          |> group()
-          |> keep(columns: ["_value", "_time", "doi"])
-          |> map(fn: (r) => ({r with _time: uint(v: r._time)}))
-          |> rename(columns: {_value: "exclamations"})
-        
-        join4 = join(
-          tables: {join3:join3, e:e},
-          on: ["doi", "_time"]
-        )
-        
-        j = baseTable
-          |> filter(fn: (r) => r["_field"] == "length")
-          |> aggregateWindow(fn: count, every: _window, createEmpty: false)
-          |> group()
-          |> keep(columns: ["_value", "_time", "doi"])
-          |> map(fn: (r) => ({r with _time: uint(v: r._time)}))
-          |> rename(columns: {_value: "count"})
-        
-        join46 = join(
-          tables: {join4:join4, j:j},
-          on: ["doi", "_time"]
-        )
-        
-        f = baseTable
-          |> filter(fn: (r) => r["_field"] == "length")
-          |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-          |> aggregateWindow(fn: median, every: _window, createEmpty: false)
-          |> group()
-          |> keep(columns: ["_value", "_time", "doi"])
-          |> map(fn: (r) => ({r with _time: uint(v: r._time)}))
-          |> rename(columns: {_value: "length"})
-        
-        join5 = join(
-          tables: {join46:join46, f:f},
-          on: ["doi", "_time"]
-        )
-        
-        jk = baseTable
-          |> filter(fn: (r) => r["_field"] == "bot_rating")
-          |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-          |> aggregateWindow(fn: mean, every: _window, createEmpty: false)
-          |> group()
-          |> keep(columns: ["_value", "_time", "doi"])
-          |> map(fn: (r) => ({r with _time: uint(v: r._time)}))
-          |> rename(columns: {_value: "mean_bot_rating"})
-        
-        join6 = join(
-          tables: {join5:join5, jk:jk},
-          on: ["doi", "_time"]
-        )
-          |> map(fn:(r) => ({ r with _time: time(v:r._time) }))
-          |> group(columns: ["doi"])
-          |> to(bucket: "history", org: "ambalytics")
-    """
-    task = tasks_api.create_task_every(name="make_history", flux=task, every="6h", organization=org_obj)
+
+    for key, item in trending_time_definition.items():
+        exist = False
+        for b in buckets:
+            if b.name == item['name']:
+                exist = True
+        if not exist:
+            if item['retention']:
+                print('create bucket %s with retention %s' % (item['name'], str(item['retention'].total_seconds())))
+                retention_rules = BucketRetentionRules(type="expire",
+                                                       every_seconds=int(item['retention'].total_seconds()))
+                created_bucket = buckets_api.create_bucket(bucket_name=item['name'],
+                                                           retention_rules=retention_rules, org=org)
+            else:
+                print('create bucket %s without retention' % item['name'])
+                created_bucket = buckets_api.create_bucket(bucket_name=item['name'], org=org)
+
+            if item['trending_bucket']:
+                print('create trending bucket %s without retention' % item['trending_bucket'])
+                created_bucket = buckets_api.create_bucket(bucket_name=item['trending_bucket'], org=org)
+
+            if item['downsample_bucket']:
+                print('create downsample task')
+
+                every = str(int(item['downsample_window'].total_seconds() // 60)) + "m"
+                name = "task_" + item['downsample_bucket']
+
+                flux = '''
+                    import "date"
+                    import "math"
+                    import "experimental"
+                    option task = { 
+                      name: "''' + name + '''",
+                      every: ''' + every + '''
+                    }
+                    
+                '''
+                flux += '_w_int = '
+                flux += str(int(item['downsample_window'].total_seconds() // 60))
+                flux += """
+                    _window = duration(v: string(v: _w_int) + "m")
+                    _duration = duration(v: string(v: 2 * _w_int) + "m")
+            
+                    _start = experimental.subDuration(d: _duration, from: date.truncate(t: now(), unit: _window))
+                    baseTable = from(bucket: """
+                flux += '"' + item['name'] + '"'
+                flux += """)
+                        |> range(start: _start, stop: date.truncate(t: now(), unit: _window))
+                        |> filter(fn: (r) => r["_measurement"] == "trending")
+                    
+                        a = baseTable
+                            |> filter(fn: (r) => r["_field"] == "followers")
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> aggregateWindow(fn: sum, every: _window, createEmpty: false)
+                            |> group()
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> keep(columns: ["_value", "_time", "_field", "doi", "_measurement"])
+                        
+                        b = baseTable
+                            |> filter(fn: (r) => r["_field"] == "sentiment_raw")
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> aggregateWindow(fn: median, every: _window, createEmpty: false)
+                            |> group()
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> keep(columns: ["_value", "_time", "_field", "doi", "_measurement"])
+                        
+                        c = baseTable
+                            |> filter(fn: (r) => r["_field"] == "contains_abstract_raw")
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> aggregateWindow(fn: median, every: _window, createEmpty: false)
+                            |> group()
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> keep(columns: ["_value", "_time", "_field", "doi", "_measurement"])
+                        
+                        ad = baseTable
+                            |> filter(fn: (r) => r["_field"] == "questions")
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> aggregateWindow(fn: mean, every: _window, createEmpty: false)
+                            |> group()
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> keep(columns: ["_value", "_time", "_field", "doi", "_measurement"])
+                        
+                        e = baseTable
+                            |> filter(fn: (r) => r["_field"] == "exclamations")
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> aggregateWindow(fn: mean, every: _window, createEmpty: false)
+                            |> group()
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> keep(columns: ["_value", "_time", "_field", "doi", "_measurement"])
+                        
+                        j = baseTable
+                            |> filter(fn: (r) => r["_field"] == "length")
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> aggregateWindow(fn: count, every: _window, createEmpty: false)
+                            |> group()
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> set(key: "_field", value: "count")
+                            |> keep(columns: ["_value", "_time", "_field", "doi", "_measurement"])
+                        
+                        f = baseTable
+                            |> filter(fn: (r) => r["_field"] == "length")
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> aggregateWindow(fn: median, every: _window, createEmpty: false)
+                            |> group()
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> keep(columns: ["_value", "_time", "_field", "doi", "_measurement"])
+                        
+                        jk = baseTable
+                            |> filter(fn: (r) => r["_field"] == "bot_rating")
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> aggregateWindow(fn: mean, every: _window, createEmpty: false)
+                            |> group()
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> keep(columns: ["_value", "_time", "_field", "doi", "_measurement"])
+                        
+                        g = baseTable
+                            |> filter(fn: (r) => r["_field"] == "score")
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> aggregateWindow(fn: sum, every: _window, createEmpty: false)
+                            |> group()
+                            |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                            |> keep(columns: ["_value", "_time", "_field", "doi", "_measurement"])
+                        
+                        union(tables: [a, b, c, ad, e, j, f, jk, g])
+                            |> group(columns: ["doi"])
+                            |> to(bucket: """
+                flux += '"' + item['downsample_bucket'] + '"'
+                flux += """, org: "ambalytics")"""
+                # print(name)
+                # print(org_obj.id)
+                # print(flux)
+                task = Task(id=0, name=name, org_id=org_obj.id, status="active", flux=flux)
+
+                task = tasks_api.create_task(task)
+                # task = tasks_api.create_task_every(name="task_" + item['downsample_bucket'], flux=task, every=every,
+                #                                    organization=org_obj)
 
 
 async def run_trend_calculation(trending_time):
@@ -261,10 +276,10 @@ async def run_trend_calculation(trending_time):
     await loop.run_in_executor(None, get_base_trend_table, trending_time)
 
 
-@app.timer(interval=trending_time_definition['now']['trending_interval'])
+@app.timer(interval=trending_time_definition['currently']['trending_interval'])
 async def trend_calc():
     print('calc trend hour')
-    await run_trend_calculation(trending_time_definition['now'])
+    await run_trend_calculation(trending_time_definition['currently'])
 
 
 @app.timer(interval=trending_time_definition['today']['trending_interval'])
@@ -280,22 +295,22 @@ async def trend_calc():
 
 
 def get_doi_list_trending(trending):
-    p = {"_bucket": trending['bucket'],
+    p = {"_bucket": trending['name'],
          "_min_count": trending['min_count'],
          "_start": trending['duration'],
          }
     # |> range(start: 2021-09-24T14:00:00Z, stop: 2021-09-24T19:00:00Z)
     query = """
-    _stop = now()
-    countTable = from(bucket: _bucket)
-        |> range(start: _start, stop: _stop)
-        |> filter(fn: (r) => r["_measurement"] == "trending")
-        |> filter(fn: (r) => r["_field"] == "score")
-        |> count()
-        |> filter(fn: (r) => r["_value"] > _min_count)
-        |> group()
-        |> keep(columns: ["doi"])
-        |> yield()  
+        _stop = now()
+        countTable = from(bucket: _bucket)
+            |> range(start: _start, stop: _stop)
+            |> filter(fn: (r) => r["_measurement"] == "trending")
+            |> filter(fn: (r) => r["_field"] == "score")
+            |> count()
+            |> filter(fn: (r) => r["_value"] > _min_count)
+            |> group()
+            |> keep(columns: ["doi"])
+            |> yield()  
     """
 
     result = query_api.query(org=org, query=query, params=p)
@@ -322,22 +337,22 @@ def calculate_trend(data):
 
 
 def get_dataframes(trending):
-    p = {"_bucket": trending['bucket'],
-         "_doi_list": get_doi_list_trending(trending),
+    p = {"_bucket": trending['name'],
          "_start": trending['duration'],
          }
+    filter_obj = doi_filter_list(get_doi_list_trending(trending), p)
     query = """
     _stop = now()
-    totalTable = from(bucket: "trending")
+    totalTable = from(bucket: _bucket)
         |> range(start: _start, stop: _stop)
         |> filter(fn: (r) => r["_measurement"] == "trending")
-        |> filter(fn: (r) => r["_field"] == "score")
-        |> filter(fn: (r) => contains(value: r["doi"], set: _doi_list))
+        |> filter(fn: (r) => r["_field"] == "score")"""
+    query += filter_obj['string']
+    query += """
         |> yield()
-    """
-    # data = query_api.query_data_frame(org=org, query=query, params=p)
+        """
 
-    result = query_api.query(org=org, query=query, params=p)
+    result = query_api.query(org=org, query=query, params=filter_obj['params'])
     results = []
     for table in result:
         scores = []
@@ -356,271 +371,286 @@ def get_dataframes(trending):
 
 def get_base_trend_table(trending):
     p = {"_start": trending['duration'],
-         "_bucket": trending['bucket'],
+         "_bucket": trending['name'],
          "_exponent": trending['time_exponent'],
          "_window": trending['window_size'],
          "_window_count": trending['window_count'],
-         "_doi_list": get_doi_list_trending(trending)
          }
-    query = '''
-                import "math"
-                import "experimental"
-                
-                _stop = now()                
-                baseTable = from(bucket: _bucket)
-                    |> range(start: _start, stop: _stop)
-                    |> filter(fn: (r) => r["_measurement"] == "trending")
-                    |> filter(fn: (r) => contains(value: r["doi"], set: _doi_list))
-                
-                windowTable = baseTable
-                    |> filter(fn: (r) => r["_field"] == "score")
-                    |> aggregateWindow(every: _window, fn: sum, createEmpty: true)
-                    |> sort(columns: ["_time"], desc: true)
-                    |> limit(n: _window_count)
-                    |> sort(columns: ["_time"])
-                    |> map(fn:(r) => ({
-                        r with _value:
-                        if exists r._value then r._value
-                        else 0.0
-                    }))
-                    |> keep(columns: ["_time", "_value", "doi"])
-                
-                stddev = windowTable
-                    |> stddev()
-                    |> group()
-                    |> keep(columns: ["_value", "doi"])
-                    |> rename(columns: {_value: "stddev"})
-                
-                ema = windowTable
-                    |> exponentialMovingAverage(n: _window_count)
-                    |> group()
-                    |> keep(columns: ["_value", "doi"])
-                    |> rename(columns: {_value: "ema"})
-                
-                j1 = join(
-                    tables: {stddev:stddev, ema:ema},
-                    on: ["doi"]
+    dois = get_doi_list_trending(trending)
+    if len(dois) > 0:
+        filter_obj = doi_filter_list(dois, p)
+        query = '''
+                    import "math"
+                    import "experimental"
+                    
+                    _stop = now()                
+                    baseTable = from(bucket: _bucket)
+                        |> range(start: _start, stop: _stop)
+                        |> filter(fn: (r) => r["_measurement"] == "trending") 
+                '''
+        query += filter_obj['string']
+        query += '''                
+        
+                    windowTable = baseTable
+                        |> filter(fn: (r) => r["_field"] == "score")
+                        |> aggregateWindow(every: _window, fn: sum, createEmpty: true)
+                        |> sort(columns: ["_time"], desc: true)
+                        |> limit(n: _window_count)
+                        |> sort(columns: ["_time"])
+                        |> map(fn:(r) => ({
+                            r with _value:
+                            if exists r._value then r._value
+                            else 0.0
+                        }))
+                        |> keep(columns: ["_time", "_value", "doi"])
+                    
+                    stddev = windowTable
+                        |> stddev()
+                        |> group()
+                        |> keep(columns: ["_value", "doi"])
+                        |> rename(columns: {_value: "stddev"})
+                    
+                    ema = windowTable
+                        |> exponentialMovingAverage(n: _window_count)
+                        |> group()
+                        |> keep(columns: ["_value", "doi"])
+                        |> rename(columns: {_value: "ema"})
+                    
+                    j1 = join(
+                        tables: {stddev:stddev, ema:ema},
+                        on: ["doi"]
+                        )
+                    
+                    ker = windowTable
+                        |> kaufmansER(n: _window_count - 1)
+                        |> group()
+                        |> keep(columns: ["_value", "doi"])
+                        |> rename(columns: {_value: "ker"})
+                    
+                    j2 = join(
+                        tables: {j1:j1, ker:ker},
+                        on: ["doi"]
+                        )
+                    
+                    kama = windowTable
+                        |> kaufmansAMA(n: _window_count -1)
+                        |> group()
+                        |> keep(columns: ["_value", "doi"])
+                        |> rename(columns: {_value: "kama"})
+                    
+                    j3 = join(
+                        tables: {kama:kama, j2:j2},
+                        on: ["doi"]
+                        )
+                    
+                    mean = baseTable
+                        |> filter(fn: (r) => r["_field"] == "score")
+                        |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                        |> median()
+                        |> group()
+                        |> keep(columns: ["_value", "doi"])
+                        |> rename(columns: {_value: "mean"})
+                    
+                    j5 = join(
+                        tables: {mean:mean, j3:j3},
+                        on: ["doi"]
+                        )
+                    
+                    prediction = windowTable
+                        |> holtWinters(n: 1,  seasonality: 0, interval: _window, withFit: false, timeColumn: "_time", column: "_value")
+                        |> group()
+                        |> keep(columns: ["_value", "doi"])
+                        |> rename(columns: {_value: "prediction"})
+                    
+                    j6 = join(
+                        tables: {prediction:prediction, j5:j5},
+                        on: ["doi"]
+                        )
+                    
+                    score = baseTable
+                      |> filter(fn: (r) => r["_field"] == "score")
+                      |> keep(columns: ["_value", "_time", "doi"])
+                      |> map(fn:(r) => ({ r with _value: float(v: r._value) * math.exp(x: _exponent * float(v: uint(v: now()) - uint(v: r._time)) / (10.0 ^ 9.0)) }))
+                      |> cumulativeSum(columns: ["_value"])
+                      |> last(column: "_value")
+                      |> keep(columns: ["_value", "doi"])
+                      |> group()
+                      |> rename(columns: {_value: "score"})
+                    
+                    j7 = join(
+                      tables: {j6:j6, score:score},
+                      on: ["doi"]
                     )
-                
-                ker = windowTable
-                    |> kaufmansER(n: _window_count - 1)
-                    |> group()
-                    |> keep(columns: ["_value", "doi"])
-                    |> rename(columns: {_value: "ker"})
-                
-                j2 = join(
-                    tables: {j1:j1, ker:ker},
-                    on: ["doi"]
+                    
+                    a = baseTable
+                      |> filter(fn: (r) => r["_field"] == "followers")
+                      |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                      |> sum()
+                      |> group()
+                      |> keep(columns: ["_value", "doi"])
+                      |> rename(columns: {_value: "sum_followers"})
+                    
+                    b = baseTable
+                      |> filter(fn: (r) => r["_field"] == "sentiment_raw")
+                      |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                      |> median()
+                      |> group()
+                      |> keep(columns: ["_value", "doi"])
+                      |> rename(columns: {_value: "median_sentiment"})
+                    
+                    c = baseTable
+                      |> filter(fn: (r) => r["_field"] == "contains_abstract_raw")
+                      |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                      |> median()
+                      |> group()
+                      |> keep(columns: ["_value", "doi"])
+                      |> rename(columns: {_value: "contains_abstract_raw"})
+                    
+                    ad = baseTable
+                      |> filter(fn: (r) => r["_field"] == "questions")
+                      |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                      |> experimental.mean()
+                      |> group()
+                      |> keep(columns: ["_value", "doi"])
+                      |> rename(columns: {_value: "questions"})
+                    
+                    e = baseTable
+                      |> filter(fn: (r) => r["_field"] == "exclamations")
+                      |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                      |> experimental.mean()
+                      |> group()
+                      |> keep(columns: ["_value", "doi"])
+                      |> rename(columns: {_value: "exclamations"})
+                    
+                    f = baseTable
+                      |> filter(fn: (r) => r["_field"] == "length")
+                      |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                      |> median()
+                      |> group()
+                      |> keep(columns: ["_value", "doi"])
+                      |> rename(columns: {_value: "length"})
+                    
+                    g = baseTable
+                      |> filter(fn: (r) => r["_field"] == "length")
+                      |> map(fn: (r) => ({r with _value: math.round(x: float(v: uint(v: now()) - uint(v: r._time)) / (10.0 ^ 9.0)) }))
+                      |> median()
+                      |> group()
+                      |> keep(columns: ["_value", "doi"])
+                      |> rename(columns: {_value: "median_age"})
+                    
+                    j = baseTable
+                      |> filter(fn: (r) => r["_field"] == "length")
+                      |> count()
+                      |> group()
+                      |> keep(columns: ["_value", "doi"])
+                      |> rename(columns: {_value: "count"})
+                    
+                    jk = baseTable
+                      |> filter(fn: (r) => r["_field"] == "bot_rating")
+                      |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                      |> experimental.mean()
+                      |> group()
+                      |> keep(columns: ["_value", "doi"])
+                      |> rename(columns: {_value: "mean_bot_rating"})
+                    
+                    join1 = join(
+                      tables: {a:a, b:b},
+                      on: ["doi"]
                     )
-                
-                kama = windowTable
-                    |> kaufmansAMA(n: _window_count -1)
-                    |> group()
-                    |> keep(columns: ["_value", "doi"])
-                    |> rename(columns: {_value: "kama"})
-                
-                j3 = join(
-                    tables: {kama:kama, j2:j2},
-                    on: ["doi"]
+                    
+                    join2 = join(
+                      tables: {join1:join1, c:c},
+                      on: ["doi"]
                     )
-                
-                mean = windowTable
-                    |> mean()
-                    |> group()
-                    |> keep(columns: ["_value", "doi"])
-                    |> rename(columns: {_value: "mean"})
-                
-                j5 = join(
-                    tables: {mean:mean, j3:j3},
-                    on: ["doi"]
+                    
+                    join3 = join(
+                      tables: {join2:join2, ad:ad},
+                      on: ["doi"]
                     )
-                
-                prediction = windowTable
-                    |> holtWinters(n: 1,  seasonality: 0, interval: _window, withFit: false, timeColumn: "_time", column: "_value")
-                    |> group()
-                    |> keep(columns: ["_value", "doi"])
-                    |> rename(columns: {_value: "prediction"})
-                
-                j6 = join(
-                    tables: {prediction:prediction, j5:j5},
-                    on: ["doi"]
+                    
+                    join4 = join(
+                      tables: {join3:join3, e:e},
+                      on: ["doi"]
                     )
-                
-                score = baseTable
-                  |> filter(fn: (r) => r["_field"] == "score")
-                  |> keep(columns: ["_value", "_time", "doi"])
-                  |> map(fn:(r) => ({ r with _value: float(v: r._value) * math.exp(x: _exponent * float(v: uint(v: now()) - uint(v: r._time)) / (10.0 ^ 9.0)) }))
-                  |> cumulativeSum(columns: ["_value"])
-                  |> last(column: "_value")
-                  |> keep(columns: ["_value", "doi"])
-                  |> group()
-                  |> rename(columns: {_value: "score"})
-                
-                j7 = join(
-                  tables: {j6:j6, score:score},
-                  on: ["doi"]
-                )
-                
-                a = baseTable
-                  |> filter(fn: (r) => r["_field"] == "followers")
-                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                  |> sum()
-                  |> group()
-                  |> keep(columns: ["_value", "doi"])
-                  |> rename(columns: {_value: "sum_followers"})
-                
-                b = baseTable
-                  |> filter(fn: (r) => r["_field"] == "sentiment_raw")
-                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                  |> median()
-                  |> group()
-                  |> keep(columns: ["_value", "doi"])
-                  |> rename(columns: {_value: "median_sentiment"})
-                
-                c = baseTable
-                  |> filter(fn: (r) => r["_field"] == "contains_abstract_raw")
-                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                  |> median()
-                  |> group()
-                  |> keep(columns: ["_value", "doi"])
-                  |> rename(columns: {_value: "contains_abstract_raw"})
-                
-                ad = baseTable
-                  |> filter(fn: (r) => r["_field"] == "questions")
-                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                  |> experimental.mean()
-                  |> group()
-                  |> keep(columns: ["_value", "doi"])
-                  |> rename(columns: {_value: "questions"})
-                
-                e = baseTable
-                  |> filter(fn: (r) => r["_field"] == "exclamations")
-                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                  |> experimental.mean()
-                  |> group()
-                  |> keep(columns: ["_value", "doi"])
-                  |> rename(columns: {_value: "exclamations"})
-                
-                f = baseTable
-                  |> filter(fn: (r) => r["_field"] == "length")
-                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                  |> median()
-                  |> group()
-                  |> keep(columns: ["_value", "doi"])
-                  |> rename(columns: {_value: "length"})
-                
-                g = baseTable
-                  |> filter(fn: (r) => r["_field"] == "length")
-                  |> map(fn: (r) => ({r with _value: math.round(x: float(v: uint(v: now()) - uint(v: r._time)) / (10.0 ^ 9.0)) }))
-                  |> median()
-                  |> group()
-                  |> keep(columns: ["_value", "doi"])
-                  |> rename(columns: {_value: "median_age"})
-                
-                j = baseTable
-                  |> filter(fn: (r) => r["_field"] == "length")
-                  |> count()
-                  |> group()
-                  |> keep(columns: ["_value", "doi"])
-                  |> rename(columns: {_value: "count"})
-                
-                jk = baseTable
-                  |> filter(fn: (r) => r["_field"] == "bot_rating")
-                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                  |> experimental.mean()
-                  |> group()
-                  |> keep(columns: ["_value", "doi"])
-                  |> rename(columns: {_value: "mean_bot_rating"})
-                
-                join1 = join(
-                  tables: {a:a, b:b},
-                  on: ["doi"]
-                )
-                
-                join2 = join(
-                  tables: {join1:join1, c:c},
-                  on: ["doi"]
-                )
-                
-                join3 = join(
-                  tables: {join2:join2, ad:ad},
-                  on: ["doi"]
-                )
-                
-                join4 = join(
-                  tables: {join3:join3, e:e},
-                  on: ["doi"]
-                )
-                
-                join46 = join(
-                  tables: {join4:join4, j:j},
-                  on: ["doi"]
-                )
-                
-                join5 = join(
-                  tables: {join46:join46, f:f},
-                  on: ["doi"]
-                )
-                
-                join6 = join(
-                  tables: {join5:join5, g:g},
-                  on: ["doi"]
-                )
-                
-                join68 = join(
-                  tables: {join6:join6, jk:jk},
-                  on: ["doi"]
-                )
-                
-                join9 = join(
-                    tables: {join68:join68, j7:j7},
-                    on: ["doi"]
-                )
-                  |> sort(columns: ["score"], desc: true)
-                  |> yield(name: "join10")
+                    
+                    join46 = join(
+                      tables: {join4:join4, j:j},
+                      on: ["doi"]
+                    )
+                    
+                    join5 = join(
+                      tables: {join46:join46, f:f},
+                      on: ["doi"]
+                    )
+                    
+                    join6 = join(
+                      tables: {join5:join5, g:g},
+                      on: ["doi"]
+                    )
+                    
+                    join68 = join(
+                      tables: {join6:join6, jk:jk},
+                      on: ["doi"]
+                    )
+                    
+                    join9 = join(
+                        tables: {join68:join68, j7:j7},
+                        on: ["doi"]
+                    )
+                      |> sort(columns: ["score"], desc: true)
+                      |> yield(name: "join10")
+    
+            '''
+        a = time.time()
+        tables = query_api.query(query, params=p)
+        print(time.time() - a)
+        # print(query)
 
-        '''
-    a = time.time()
-    tables = query_api.query(query, params=p)
-    print(time.time() - a)
+        print('done pubs')
+        session_factory = sessionmaker(bind=DAO.engine)
+        Session = scoped_session(session_factory)
+        session = Session()
 
-    print('done pubs')
-    session_factory = sessionmaker(bind=DAO.engine)
-    Session = scoped_session(session_factory)
-    session = Session()
+        frames = get_dataframes(trending)
+        trend = calculate_trend(frames)
 
-    frames = get_dataframes(trending)
-    trend = calculate_trend(frames)
+        print('done trends')
 
-    print('done trends')
+        delete_trending_table(session, trending['name'])
 
-    delete_trending_table(session, abs(trending['duration'].total_seconds()))
+        trending_objects = []
+        for table in tables:
+            for record in table.records:
+                trending_value = 0
+                if record['doi'] in trend:
+                    trending_value = trend[record['doi']]
 
-    trending_objects = []
-    for table in tables:
-        for record in table.records:
-            t_obj = Trending(publication_doi=record['doi'], duration=abs(trending['duration'].total_seconds()),
-                             score=record['score'], count=record['count'],
-                             median_sentiment=record['median_sentiment'],
-                             sum_follower=record['sum_followers'],
-                             median_age=record['median_age'],
-                             median_length=record['length'],
-                             mean_questions=record['questions'],
-                             mean_exclamations=record['exclamations'],
-                             abstract_difference=record['contains_abstract_raw'],
-                             mean_bot_rating=record['mean_bot_rating'],
-                             ema=record['ema'],
-                             kama=record['kama'],
-                             ker=record['ker'],
-                             mean_score=record['mean'],
-                             stddev=record['stddev'],
-                             trending=trend[record['doi']],
-                             projected_change=record['prediction'])
+                save_trend_to_influx(record, trending_value, trending['trending_bucket'])
 
-            t_obj = save_or_update(session, t_obj, Trending,
-                                {'publication_doi': t_obj.publication_doi, 'duration': t_obj.duration})
-            trending_objects.append(t_obj)
-    return trending_objects
+                t_obj = Trending(publication_doi=record['doi'],
+                                 duration=trending['name'],
+                                 score=record['score'], count=record['count'],
+                                 median_sentiment=record['median_sentiment'],
+                                 sum_followers=record['sum_followers'],
+                                 median_age=record['median_age'],
+                                 median_length=record['length'],
+                                 mean_questions=record['questions'],
+                                 mean_exclamations=record['exclamations'],
+                                 abstract_difference=record['contains_abstract_raw'],
+                                 mean_bot_rating=record['mean_bot_rating'],
+                                 ema=record['ema'],
+                                 kama=record['kama'],
+                                 ker=record['ker'],
+                                 mean_score=record['mean'],
+                                 stddev=record['stddev'],
+                                 trending=trending_value,
+                                 projected_change=record['prediction'])
+
+                t_obj = save_or_update(session, t_obj, Trending,
+                                       {'publication_doi': t_obj.publication_doi, 'duration': t_obj.duration})
+                trending_objects.append(t_obj)
+        return trending_objects
+    return []
 
 
 def delete_trending_table(session, duration):
@@ -644,11 +674,42 @@ def save_or_update(session, obj, table, kwargs):
     return obj
 
 
+def save_trend_to_influx(record, trending_value, bucket):
+    point = {
+        "measurement": "trending",
+        "tags": {
+            "doi": record['doi']
+        },
+        "fields": {
+            "score": record['score'],
+            "count": record['count'],
+            "median_sentiment": record['median_sentiment'],
+            "sum_follower": record['sum_followers'],
+            "median_age": record['median_age'],
+            "median_length": record['length'],
+            "mean_questions": record['questions'],
+            "mean_exclamations": record['exclamations'],
+            "abstract_difference": record['contains_abstract_raw'],
+            "mean_bot_rating": record['mean_bot_rating'],
+            "ema": record['ema'],
+            "kama": record['kama'],
+            "ker": record['ker'],
+            "mean_score": record['mean'],
+            "stddev": record['stddev'],
+            "trending": trending_value,
+            "projected_change": record['prediction']
+        },
+        "time": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')}
+
+    # print(bucket)
+    # print(point)
+    write_api.write(bucket, org, [point])
+
+
 def save_data_to_influx(data):
     doi = data['obj']['data']['doi']
     createdAt = data['timestamp']
     score = data['subj']['processed']['score']
-    # todo save id or index instead of the actual string since its only for diversity?
 
     point = {
         "measurement": "trending",
@@ -669,8 +730,19 @@ def save_data_to_influx(data):
         },
         "time": createdAt}
 
-    print(point)
-    write_api.write('trending', org, [point])
+    # print(point)
+    write_api.write('currently', org, [point])
+
+
+def doi_filter_list(doi_list, params):
+    filter_string = "|> filter(fn: (r) =>"
+    i = 0
+    for doi in doi_list:
+        filter_string += 'r["doi"] == _doi_nr_' + str(i) + ' or '
+        params['_doi_nr_' + str(i)] = doi
+        i += 1
+    filter_string = filter_string[:-4] + ')'
+    return {"string": filter_string, "params": params}
 
 
 # sink=[aggregated_topic]
