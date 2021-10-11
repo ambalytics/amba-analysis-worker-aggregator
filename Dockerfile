@@ -4,7 +4,7 @@ WORKDIR /src
 COPY . .
 
 RUN pip install --upgrade pip
-
+RUN pip install --upgrade sentry-sdk
 COPY src/requirements.txt /requirements.txt
 RUN pip install -r src/requirements.txt
 COPY ./src/aggregator.py /aggregator.py

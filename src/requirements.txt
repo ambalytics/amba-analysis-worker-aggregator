@@ -1,3 +1,7 @@
 amba-event-stream
 faust-streaming
-heapdict
+# heapdict
+influxdb-client
+influxdb-client[extra]
+pandas
+pymannkendall
