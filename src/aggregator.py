@@ -1,12 +1,8 @@
-import copy
 import datetime
 import os
+import sentry_sdk
 import time
-import types
-import uuid
 from datetime import timedelta, datetime
-from heapq import heappop
-from typing import cast
 from influxdb_client.client.write_api import ASYNCHRONOUS
 import asyncio
 from event_stream import dao
@@ -16,9 +12,8 @@ from sqlalchemy.orm import sessionmaker, scoped_session
 import pandas as pd
 import pymannkendall as mk
 from sqlalchemy import text, bindparam
-
 import faust
-from faust.types.windows import WindowT
+
 
 broker = os.environ.get('KAFKA_BOOTRSTRAP_SERVER', 'kafka:9092')
 app = faust.App(
@@ -27,6 +22,13 @@ app = faust.App(
     stream_publish_on_commit=False,
     producer_max_request_size=1500000,
     topic_partitions=1,
+)
+
+SENTRY_DSN = os.environ.get('SENTRY_DSN')
+SENTRY_TRACE_SAMPLE_RATE = os.environ.get('SENTRY_TRACE_SAMPLE_RATE')
+sentry_sdk.init(
+    dsn=SENTRY_DSN,
+    traces_sample_rate=SENTRY_TRACE_SAMPLE_RATE
 )
 
 DAO = dao.DAO()
@@ -62,10 +64,10 @@ trending_time_definition = {
         'trending_interval': timedelta(minutes=60),
         'time_exponent': -0.000025,
         'window_size': timedelta(minutes=24),
-        'min_count': 15,
+        'min_count': 30,
         'window_count': 60,
         'downsample_bucket': 'week',
-        'downsample_window': timedelta(minutes=6)
+        'downsample_window': timedelta(minutes=10)
     },
     'week': {
         'name': 'week',
@@ -75,10 +77,10 @@ trending_time_definition = {
         'trending_interval': timedelta(hours=6),
         'time_exponent': -0.00000357142857,
         'window_size': timedelta(minutes=168),
-        'min_count': 15,
+        'min_count': 200,
         'window_count': 60,
         'downsample_bucket': 'month',
-        'downsample_window': timedelta(minutes=42)
+        'downsample_window': timedelta(minutes=60)
     },
     'month': {
         'name': 'month',
@@ -88,7 +90,7 @@ trending_time_definition = {
         'trending_interval': timedelta(hours=8),
         'time_exponent': -0.000000833333333,
         'window_size': timedelta(minutes=720),
-        'min_count': 15,
+        'min_count': 500,
         'window_count': 60,
         'downsample_bucket': 'year',
         'downsample_window': timedelta(minutes=360)
@@ -101,7 +103,7 @@ trending_time_definition = {
         'trending_interval': timedelta(hours=24),
         'time_exponent': -0.000000833333333,
         'window_size': timedelta(minutes=8760),
-        'min_count': 15,
+        'min_count': 1000,
         'window_count': 60,
         'downsample_bucket': 'history',
         'downsample_window': timedelta(minutes=1440)
@@ -277,21 +279,33 @@ async def run_trend_calculation(trending_time):
 
 
 @app.timer(interval=trending_time_definition['currently']['trending_interval'])
-async def trend_calc():
-    print('calc trend hour')
+async def trend_calc_currently():
+    print('calc trend currently')
     await run_trend_calculation(trending_time_definition['currently'])
 
 
 @app.timer(interval=trending_time_definition['today']['trending_interval'])
-async def trend_calc():
+async def trend_calc_today():
     print('calc trend today')
     await run_trend_calculation(trending_time_definition['today'])
 
 
-# @app.timer(interval=trending_time_definition['week']['trending_interval'])
-# async def trend_calc():
-#     print('calc trend week')
-#     get_base_trend_table(trending_time_definition['week'])
+@app.timer(interval=trending_time_definition['week']['trending_interval'])
+async def trend_calc_week():
+    print('calc trend week')
+    await run_trend_calculation(trending_time_definition['week'])
+
+
+@app.timer(interval=trending_time_definition['month']['trending_interval'])
+async def trend_calc_month():
+    print('calc trend month')
+    await run_trend_calculation(trending_time_definition['month'])
+
+
+@app.timer(interval=trending_time_definition['year']['trending_interval'])
+async def trend_calc_year():
+    print('calc trend year')
+    await run_trend_calculation(trending_time_definition['year'])
 
 
 def get_doi_list_trending(trending):
@@ -318,7 +332,7 @@ def get_doi_list_trending(trending):
     for table in result:
         for record in table.records:
             results.append(record['doi'])
-    print(results)
+    # print(results)
     return results
 
 
@@ -603,10 +617,10 @@ def get_base_trend_table(trending):
             '''
         a = time.time()
         tables = query_api.query(query, params=p)
-        print(time.time() - a)
+        # print(time.time() - a)
         # print(query)
 
-        print('done pubs')
+        # print('done pubs')
         session_factory = sessionmaker(bind=DAO.engine)
         Session = scoped_session(session_factory)
         session = Session()
@@ -614,7 +628,7 @@ def get_base_trend_table(trending):
         frames = get_dataframes(trending)
         trend = calculate_trend(frames)
 
-        print('done trends')
+        # print('done trends ' + trending['name'])
 
         delete_trending_table(session, trending['name'])
 
