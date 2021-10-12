@@ -13,6 +13,7 @@ import pandas as pd
 import pymannkendall as mk
 from sqlalchemy import text, bindparam
 import faust
+import tweepy
 
 broker = os.environ.get('KAFKA_BOOTRSTRAP_SERVER', 'kafka:9092')
 app = faust.App(
@@ -308,7 +309,7 @@ async def trend_calc_year():
 
 
 # @app.crontab('0 8 * * *')
-@app.timer(interval=timedelta(minutes=1))
+@app.timer(interval=timedelta(minutes=3))
 async def hot_papers():
     query = """
             SELECT ROW_NUMBER() OVER (ORDER BY t.score DESC) as trending_ranking, *
@@ -348,11 +349,19 @@ async def hot_papers():
             break
         end -= 1
 
-    tweet = {
-        'status': pretext,
-    }
-    print(tweet['status'])
-    print(len(tweet['status']))
+    print(pretext)
+    print(len(pretext))
+
+    if 100 < len(pretext) < 280:
+        consumer_key = os.environ.get('CONSUMER_KEY_TWITTER_BOT')
+        consumer_secret = os.environ.get('CONSUMER_SECRET_TWITTER_BOT')
+        access_token = os.environ.get('ACCESS_TOKEN_TWITTER_BOT')
+        access_token_secret = os.environ.get('ACCESS_TOKEN_SECRET_TWITTER_BOT')
+        auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
+        auth.set_access_token(access_token, access_token_secret)
+        api = tweepy.API(auth)
+        print(api.verify_credentials().name)
+        api.update_status(status=pretext)
 
 
 def smart_truncate(content, length=100, suffix=' (...)'):

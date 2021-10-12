@@ -4,3 +4,4 @@ influxdb-client
 influxdb-client[extra]
 pandas
 pymannkendall
+tweepy
