@@ -332,19 +332,31 @@ async def hot_papers():
     session = Session()
     result = session.execute(s, params).fetchall()
 
-    pretext = 'Todays trending papers in general medicine:'
-    for r in result:
-        pretext += str(r['trending_ranking']) + '. ' + r['name'].split(' ')[-1] + ' et al. ' + smart_truncate(
-            r['title']) + '\n'
-    pretext += 'https://analysis.ambalytics.cloud/#/fieldOfStudy/21?time=today'
+    length = 40
+    end = 4
+    pretext = ""
+    while end > 0:
+        pretext = 'Todays trending papers in general medicine:'
+        for r in result:
+            pretext += """
+            """ + str(r['trending_ranking']) + '. ' + r['name'].split(' ')[-1] + ' et al. ' \
+                       + smart_truncate(r['title'], length)
+        pretext += 'https://bit.ly/3ADeaMK'
+
+        if len(pretext) > 280:
+            length -= 10
+        else:
+            break
+        end -= 1
 
     tweet = {
         'status': pretext,
     }
     print(tweet)
+    print(len(tweet))
 
 
-def smart_truncate(content, length=100, suffix='...'):
+def smart_truncate(content, length=100, suffix=' (...)'):
     if len(content) <= length:
         return content
     else:
