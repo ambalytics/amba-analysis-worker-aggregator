@@ -308,8 +308,7 @@ async def trend_calc_year():
     await run_trend_calculation(trending_time_definition['year'])
 
 
-# @app.crontab('0 8 * * *')
-@app.timer(interval=timedelta(minutes=3))
+@app.crontab('0 8 * * *')
 async def hot_papers():
     query = """
             SELECT ROW_NUMBER() OVER (ORDER BY t.score DESC) as trending_ranking, *
