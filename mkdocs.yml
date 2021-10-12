@@ -26,3 +26,4 @@ plugins:
             - from unittest.mock import MagicMock as mock
             - sys.path.append("src")
             - sys.modules["event_stream"] = mock()
+            - sys.modules["event_stream.models"] = mock()
