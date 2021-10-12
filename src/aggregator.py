@@ -14,7 +14,6 @@ import pymannkendall as mk
 from sqlalchemy import text, bindparam
 import faust
 
-
 broker = os.environ.get('KAFKA_BOOTRSTRAP_SERVER', 'kafka:9092')
 app = faust.App(
     'aggregator',
@@ -306,6 +305,50 @@ async def trend_calc_month():
 async def trend_calc_year():
     print('calc trend year')
     await run_trend_calculation(trending_time_definition['year'])
+
+
+# @app.crontab('0 8 * * *')
+@app.timer(interval=trending_time_definition['today']['trending_interval'])
+async def hot_papers():
+    query = """
+            SELECT ROW_NUMBER() OVER (ORDER BY t.score DESC) as trending_ranking, *
+            FROM (SELECT distinct on (p.id) score, p.*, a.name
+                  FROM trending t
+                       JOIN publication p on p.doi = t.publication_doi
+                       JOIN publication_field_of_study pfos on p.doi = pfos.publication_doi
+                       JOIN publication_author pa on pfos.publication_doi = pa.publication_doi
+                       JOIN author a on pa.author_id = a.id
+                WHERE duration = :duration AND field_of_study_id = :fos_id) t
+            ORDER BY trending_ranking LIMIT 3;
+    """
+    duration = trending_time_definition['today']['name']
+    fos_id = 21
+    params = {'duration': duration, 'fos_id': fos_id}
+
+    s = text(query).bindparams(bindparam('duration'), bindparam('fos_id'))
+
+    session_factory = sessionmaker(bind=DAO.engine)
+    Session = scoped_session(session_factory)
+    session = Session()
+    result = session.execute(s, params).fetchall()
+
+    pretext = 'Todays trending papers in general medicine:'
+    for r in result:
+        pretext += str(r['trending_ranking']) + '. ' + r['name'].split(' ')[-1] + ' et al. ' + smart_truncate(
+            r['title']) + '\n'
+    pretext += 'https://analysis.ambalytics.cloud/#/fieldOfStudy/21?time=today'
+
+    tweet = {
+        'status': pretext,
+    }
+    print(tweet)
+
+
+def smart_truncate(content, length=100, suffix='...'):
+    if len(content) <= length:
+        return content
+    else:
+        return ' '.join(content[:length + 1].split(' ')[0:-1]) + suffix
 
 
 def get_doi_list_trending(trending):
