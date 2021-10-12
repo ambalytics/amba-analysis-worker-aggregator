@@ -1,3 +1,12 @@
+amba-event-stream
+faust-streaming
+influxdb-client
+influxdb-client[extra]
+pandas
+pymannkendall
+kafka-python
+sqlalchemy
+psycopg2
 sentry_sdk
 mkdocs
 mkdocs-material
