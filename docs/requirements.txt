@@ -1,7 +1,10 @@
 amba-event-stream
 faust-streaming
-heapdict
-
+influxdb-client
+influxdb-client[extra]
+pandas
+pymannkendall
+sentry_sdk
 mkdocs
 mkdocs-material
 mkdocstrings
