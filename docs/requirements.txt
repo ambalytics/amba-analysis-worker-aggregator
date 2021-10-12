@@ -3,6 +3,7 @@ influxdb-client
 influxdb-client[extra]
 pandas
 pymannkendall
+tweepy
 sentry_sdk
 mkdocs
 mkdocs-material
