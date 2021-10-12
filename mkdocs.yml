@@ -23,4 +23,10 @@ plugins:
         python:
           setup_commands:
             - import sys
+            - from unittest.mock import MagicMock as mock
             - sys.path.append("src")
+            - sys.modules["event_stream"] = mock()
+            - sys.modules["event_stream.models"] = mock()
+            - sys.modules["event_stream.models.model"] = mock()
+            - sys.modules["sqlalchemy"] = mock()
+            - sys.modules["sqlalchemy.orm"] = mock()
