@@ -1,4 +1,3 @@
-amba-event-stream
 faust-streaming
 influxdb-client
 influxdb-client[extra]
