@@ -338,10 +338,9 @@ async def hot_papers():
     while end > 0:
         pretext = 'Todays trending papers in general medicine:'
         for r in result:
-            pretext += """
-            """ + str(r['trending_ranking']) + '. ' + r['name'].split(' ')[-1] + ' et al. ' \
+            pretext += "\n" + str(r['trending_ranking']) + '. ' + r['name'].split(' ')[-1] + ' et al. ' \
                        + smart_truncate(r['title'], length)
-        pretext += 'https://bit.ly/3ADeaMK'
+        pretext += '\nhttps://bit.ly/3ADeaMK'
 
         if len(pretext) > 280:
             length -= 10
@@ -352,8 +351,8 @@ async def hot_papers():
     tweet = {
         'status': pretext,
     }
-    print(tweet)
-    print(len(tweet))
+    print(tweet['status'])
+    print(len(tweet['status']))
 
 
 def smart_truncate(content, length=100, suffix=' (...)'):
