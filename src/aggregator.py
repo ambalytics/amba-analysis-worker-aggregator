@@ -116,6 +116,8 @@ trending_time_definition = {
     'numbers': {
         'name': 'numbers',
         'retention': timedelta(days=7),
+        'trending_bucket': False,
+        'downsample_bucket': False
     },
     # 'history': {
     #     'name': 'history',
@@ -280,7 +282,7 @@ async def init_influx():
                 print('create numbers task')
 
                 every = str(int(item['numbers_window'].total_seconds() // 60)) + "m"
-                name = "task_" + item['numbers_window']
+                name = "task_numbers_" + item['name']
 
                 flux = '''
                     import "date"
@@ -292,17 +294,10 @@ async def init_influx():
                     }
                     
                 '''
-                flux += '_w_int = '
-                flux += str(int(item['numbers_window'].total_seconds() // 60))
                 flux += """
-                    _duration = duration(v: string(v: 2 * _w_int) + "m")
-                    _start = experimental.subDuration(d: _duration, from: date.truncate(t: now(), unit: _window))
-                    baseTable = from(bucket: """
-                flux += '"' + item['name'] + '"'
-                flux += """
-                            _start = -6h
+                            _start = """ + str(int(item['duration'].total_seconds())) + """s
                             _stop = now()
-                            _bucket = "currently"
+                            _bucket = """ + '"' + item['name'] + '"' + """
                             
                             numbers = (tables=<-, field_selector, aggregator, bucket, name) => 
                               tables
@@ -313,26 +308,22 @@ async def init_influx():
                                  |> toFloat()
                                  |> set(key: "_measurement", value: bucket)
                                  |> set(key: "_field", value: name)
-                                 |> set(key: "_time", value: string(v: now()))
-                            
-                            t = from(bucket: _bucket)
-                              |> range(start: _start, stop: _stop)
-                              |> filter(fn: (r) => r["_measurement"] == "trending")
+                                 |> map(fn: (r) => ({ r with _time: now() }))
                             
                             aa = from(bucket: _bucket)
                               |> range(start: _start, stop: _stop)
                               |> filter(fn: (r) => r["_measurement"] == "trending")
-                              |> numbers(aggregator: mean, field_selector: "bot_rating", bucket: _bucket, name: "bot_rating")
+                              |> numbers(aggregator: experimental.mean, field_selector: "bot_rating", bucket: _bucket, name: "bot_rating")
                              
                             ab = from(bucket: _bucket)
                               |> range(start: _start, stop: _stop)
                               |> filter(fn: (r) => r["_measurement"] == "trending")
-                              |> numbers(aggregator: mean, field_selector: "contains_abstract_raw", bucket: _bucket, name: "contains_abstract_raw")
+                              |> numbers(aggregator: experimental.mean, field_selector: "contains_abstract_raw", bucket: _bucket, name: "contains_abstract_raw")
                              
                             ac = from(bucket: _bucket)
                               |> range(start: _start, stop: _stop)
                               |> filter(fn: (r) => r["_measurement"] == "trending")
-                              |> numbers(aggregator: mean, field_selector: "exclamations", bucket: _bucket, name: "exclamations")
+                              |> numbers(aggregator: experimental.mean, field_selector: "exclamations", bucket: _bucket, name: "exclamations")
                              
                             ad = from(bucket: _bucket)
                               |> range(start: _start, stop: _stop)
@@ -341,13 +332,13 @@ async def init_influx():
                              
                             ae = from(bucket: _bucket)
                               |> range(start: _start, stop: _stop)
-                              |> filter(fn: (r) => r["_measurement"] == "trending")
-                              |> numbers(aggregator: mean, field_selector: "length", bucket: _bucket, name: "length")
+                              |> filter(fn: (r) => r["_measur,,ement"] == "trending")
+                              |> numbers(aggregator: experimental.mean, field_select,,or: "length", bucket: _bucket, name: "length")
                              
                             af =from(bucket: _bucket)
                               |> range(start: _start, stop: _stop)
                               |> filter(fn: (r) => r["_measurement"] == "trending")
-                              |> numbers(aggregator: mean, field_selector: "questions", bucket: _bucket, name: "questions")
+                              |> numbers(aggregator: experimental.mean, field_selector: "questions", bucket: _bucket, name: "questions")
                              
                             ag = from(bucket: _bucket)
                               |> range(start: _start, stop: _stop)
@@ -357,7 +348,7 @@ async def init_influx():
                             ah = from(bucket: _bucket)
                               |> range(start: _start, stop: _stop)
                               |> filter(fn: (r) => r["_measurement"] == "trending")
-                              |> numbers(aggregator: mean, field_selector: "sentiment_raw", bucket: _bucket, name: "sentiment_raw")
+                              |> numbers(aggregator: experimental.mean, field_selector: "sentiment_raw", bucket: _bucket, name: "sentiment_raw")
                              
                             ai = from(bucket: _bucket)
                               |> range(start: _start, stop: _stop)
@@ -375,11 +366,10 @@ async def init_influx():
                               |> toFloat()
                               |> set(key: "_measurement", value: _bucket)
                               |> set(key: "_field", value: "pub_count")
-                              |> set(key: "_time", value: string(v: now()))
+                              |> map(fn: (r) => ({ r with _time: now() }))
                              
                              union(tables: [aa, ab, ac, ad, ae, af, ag, ah, ai, aj])
-                              |> yield(name: "test")
-                              |> to(bucket: numbers, org: "ambalytics")"""
+                              |> to(bucket: "numbers", org: "ambalytics")"""
                 # print(name)
                 # print(org_obj.id)
                 # print(flux)
@@ -649,7 +639,7 @@ def get_base_trend_table(trending):
                     mean = baseTable
                         |> filter(fn: (r) => r["_field"] == "score")
                         |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                        |> mean()
+                        |> experimental.mean()
                         |> group()
                         |> keep(columns: ["_value", "doi"])
                         |> rename(columns: {_value: "mean"})
@@ -696,7 +686,7 @@ def get_base_trend_table(trending):
                     b = baseTable
                       |> filter(fn: (r) => r["_field"] == "sentiment_raw")
                       |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                      |> mean()
+                      |> experimental.mean()
                       |> group()
                       |> keep(columns: ["_value", "doi"])
                       |> rename(columns: {_value: "mean_sentiment"})
@@ -704,7 +694,7 @@ def get_base_trend_table(trending):
                     c = baseTable
                       |> filter(fn: (r) => r["_field"] == "contains_abstract_raw")
                       |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                      |> mean()
+                      |> experimental.mean()
                       |> group()
                       |> keep(columns: ["_value", "doi"])
                       |> rename(columns: {_value: "contains_abstract_raw"})
@@ -728,7 +718,7 @@ def get_base_trend_table(trending):
                     f = baseTable
                       |> filter(fn: (r) => r["_field"] == "length")
                       |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                      |> mean()
+                      |> experimental.mean()
                       |> group()
                       |> keep(columns: ["_value", "doi"])
                       |> rename(columns: {_value: "length"})
@@ -736,7 +726,7 @@ def get_base_trend_table(trending):
                     g = baseTable
                       |> filter(fn: (r) => r["_field"] == "length")
                       |> map(fn: (r) => ({r with _value: math.round(x: float(v: uint(v: now()) - uint(v: r._time)) / (10.0 ^ 9.0)) }))
-                      |> mean()
+                      |> experimental.mean()
                       |> group()
                       |> keep(columns: ["_value", "doi"])
                       |> rename(columns: {_value: "mean_age"})
