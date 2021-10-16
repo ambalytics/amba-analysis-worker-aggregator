@@ -370,7 +370,7 @@ async def init_influx():
                              
                              union(tables: [aa, ab, ac, ad, ae, af, ag, ah, ai, aj])
                               |> to(bucket: "numbers", org: "ambalytics")"""
-                print(name)
+                # print(name)
                 # print(org_obj.id)
                 # print(flux)
                 task = Task(id=1, name=name, org_id=org_obj.id, status="active", flux=flux)
