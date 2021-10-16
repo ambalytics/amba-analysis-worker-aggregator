@@ -333,7 +333,7 @@ async def init_influx():
                             ae = from(bucket: _bucket)
                               |> range(start: _start, stop: _stop)
                               |> filter(fn: (r) => r["_measur,,ement"] == "trending")
-                              |> numbers(aggregator: experimental.mean, field_select,,or: "length", bucket: _bucket, name: "length")
+                              |> numbers(aggregator: experimental.mean, field_selector: "length", bucket: _bucket, name: "length")
                              
                             af = from(bucket: _bucket)
                               |> range(start: _start, stop: _stop)
@@ -370,7 +370,7 @@ async def init_influx():
                              
                              union(tables: [aa, ab, ac, ad, ae, af, ag, ah, ai, aj])
                               |> to(bucket: "numbers", org: "ambalytics")"""
-                # print(name)
+                print(name)
                 # print(org_obj.id)
                 # print(flux)
                 task = Task(id=1, name=name, org_id=org_obj.id, status="active", flux=flux)
