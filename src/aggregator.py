@@ -335,7 +335,7 @@ async def init_influx():
                               |> filter(fn: (r) => r["_measur,,ement"] == "trending")
                               |> numbers(aggregator: experimental.mean, field_select,,or: "length", bucket: _bucket, name: "length")
                              
-                            af =from(bucket: _bucket)
+                            af = from(bucket: _bucket)
                               |> range(start: _start, stop: _stop)
                               |> filter(fn: (r) => r["_measurement"] == "trending")
                               |> numbers(aggregator: experimental.mean, field_selector: "questions", bucket: _bucket, name: "questions")
