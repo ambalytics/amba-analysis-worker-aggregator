@@ -14,7 +14,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.2.2, mkdocs-material-7.3.3">
+      <meta name="generator" content="mkdocs-1.2.3, mkdocs-material-7.3.3">
     
     
       
@@ -294,6 +294,13 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#aggregator.get_doi_list_trending" class="md-nav__link">
+    get_doi_list_trending()
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -335,6 +342,13 @@
         <li class="md-nav__item">
   <a href="#aggregator" class="md-nav__link">
     aggregator
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aggregator.get_doi_list_trending" class="md-nav__link">
+    get_doi_list_trending()
   </a>
   
 </li>
@@ -390,6 +404,65 @@
 
 
 
+
+
+  <div class="doc doc-object doc-function">
+
+
+
+<h2 id="aggregator.get_doi_list_trending" class="doc doc-heading">
+<code class="highlight language-python"><span class="n">get_doi_list_trending</span><span class="p">(</span><span class="n">trending</span><span class="p">)</span></code>
+
+
+</h2>
+
+    <div class="doc doc-contents ">
+
+      <p>Return a list of dois that have the required min count for the trending definition given.
+It will use the count of datapoints not the actual tweet count.</p>
+<p>:param trending:
+:return:</p>
+
+        <details class="quote">
+          <summary>Source code in <code>src/aggregator.py</code></summary>
+          <div class="highlight"><pre><span></span><code><span class="k">def</span> <span class="nf">get_doi_list_trending</span><span class="p">(</span><span class="n">trending</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Return a list of dois that have the required min count for the trending definition given.</span>
+<span class="sd">    It will use the count of datapoints not the actual tweet count.</span>
+
+<span class="sd">    :param trending:</span>
+<span class="sd">    :return:</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;_bucket&quot;</span><span class="p">:</span> <span class="n">trending</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">],</span>
+         <span class="s2">&quot;_min_count&quot;</span><span class="p">:</span> <span class="n">trending</span><span class="p">[</span><span class="s1">&#39;min_count&#39;</span><span class="p">],</span>
+         <span class="s2">&quot;_start&quot;</span><span class="p">:</span> <span class="n">trending</span><span class="p">[</span><span class="s1">&#39;duration&#39;</span><span class="p">],</span>
+         <span class="p">}</span>
+    <span class="c1"># |&gt; range(start: 2021-09-24T14:00:00Z, stop: 2021-09-24T19:00:00Z)</span>
+    <span class="n">query</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">        _stop = now()</span>
+<span class="s2">        countTable = from(bucket: _bucket)</span>
+<span class="s2">            |&gt; range(start: _start, stop: _stop)</span>
+<span class="s2">            |&gt; filter(fn: (r) =&gt; r[&quot;_measurement&quot;] == &quot;trending&quot;)</span>
+<span class="s2">            |&gt; filter(fn: (r) =&gt; r[&quot;_field&quot;] == &quot;score&quot;)</span>
+<span class="s2">            |&gt; count()</span>
+<span class="s2">            |&gt; filter(fn: (r) =&gt; r[&quot;_value&quot;] &gt; _min_count)</span>
+<span class="s2">            |&gt; group()</span>
+<span class="s2">            |&gt; keep(columns: [&quot;doi&quot;])</span>
+<span class="s2">            |&gt; yield()  </span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+    <span class="n">result</span> <span class="o">=</span> <span class="n">query_api</span><span class="o">.</span><span class="n">query</span><span class="p">(</span><span class="n">org</span><span class="o">=</span><span class="n">org</span><span class="p">,</span> <span class="n">query</span><span class="o">=</span><span class="n">query</span><span class="p">,</span> <span class="n">params</span><span class="o">=</span><span class="n">p</span><span class="p">)</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">table</span> <span class="ow">in</span> <span class="n">result</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">record</span> <span class="ow">in</span> <span class="n">table</span><span class="o">.</span><span class="n">records</span><span class="p">:</span>
+            <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">record</span><span class="p">[</span><span class="s1">&#39;doi&#39;</span><span class="p">])</span>
+    <span class="c1"># print(results)</span>
+    <span class="k">return</span> <span class="n">results</span>
+</code></pre></div>
+        </details>
+    </div>
+
+  </div>
 
 
 
