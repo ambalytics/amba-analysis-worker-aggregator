@@ -46,67 +46,78 @@ trending_time_definition = {
     'currently': {
         'name': 'currently',
         'trending_bucket': 'trending_currently',
+        'time_exponent': -0.00036,
         'duration': timedelta(hours=-6),
         'retention': timedelta(hours=7),
-        'trending_interval': timedelta(minutes=3),
-        'time_exponent': -0.00036,
         'window_size': timedelta(minutes=6),
         'window_count': 60,
-        'min_count': 15,
+        'min_count': 10,
+        'trending_interval': timedelta(minutes=3),
         'downsample_bucket': 'today',
-        'downsample_window': timedelta(minutes=1)
+        'downsample_window': timedelta(minutes=2),
+        'numbers_window': timedelta(minutes=1)
     },
     'today': {
         'name': 'today',
         'trending_bucket': 'trending_today',
+        'time_exponent': -0.000025,
         'duration': timedelta(hours=-24),
         'retention': timedelta(hours=25),
-        'trending_interval': timedelta(minutes=60),
-        'time_exponent': -0.000025,
         'window_size': timedelta(minutes=24),
-        'min_count': 30,
         'window_count': 60,
+        'min_count': 30,  # max 576
+        'trending_interval': timedelta(minutes=45),
         'downsample_bucket': 'week',
-        'downsample_window': timedelta(minutes=10)
+        'downsample_window': timedelta(minutes=20),
+        'numbers_window': timedelta(minutes=2)
     },
     'week': {
         'name': 'week',
         'trending_bucket': 'trending_week',
+        'time_exponent': -0.00000357142857,
         'duration': timedelta(days=-7),
         'retention': timedelta(days=7, hours=1),
-        'trending_interval': timedelta(hours=6),
-        'time_exponent': -0.00000357142857,
         'window_size': timedelta(minutes=168),
-        'min_count': 200,
         'window_count': 60,
+        'min_count': 30, # max 504
+        'trending_interval': timedelta(hours=6),
         'downsample_bucket': 'month',
-        'downsample_window': timedelta(minutes=60)
+        'downsample_window': timedelta(hours=2),
+        'numbers_window': timedelta(minutes=20)
     },
     'month': {
         'name': 'month',
         'trending_bucket': 'trending_month',
+        'time_exponent': -0.000000833333333,
         'duration': timedelta(days=-30),
         'retention': timedelta(days=30, hours=1),
-        'trending_interval': timedelta(hours=8),
-        'time_exponent': -0.000000833333333,
         'window_size': timedelta(minutes=720),
-        'min_count': 500,
         'window_count': 60,
+        'min_count': 30, # max 360
+        'trending_interval': timedelta(hours=24),
         'downsample_bucket': 'year',
-        'downsample_window': timedelta(minutes=360)
+        'downsample_window': timedelta(hours=24),
+        'numbers_window': timedelta(hours=2)
     },
     'year': {
         'name': 'year',
         'trending_bucket': 'trending_year',
+        'time_exponent': -0.000000833333333,
         'duration': timedelta(days=-365),
         'retention': timedelta(days=365, hours=1),
-        'trending_interval': timedelta(hours=24),
-        'time_exponent': -0.000000833333333,
         'window_size': timedelta(minutes=8760),
-        'min_count': 1000,
         'window_count': 60,
+        'min_count': 30, # max 365
+        'trending_interval': timedelta(days=3),
         'downsample_bucket': 'history',
-        'downsample_window': timedelta(minutes=1440)
+        'downsample_window': timedelta(days=3),
+        'numbers_window': timedelta(hours=24)
+    },
+    'numbers': {
+        'name': 'numbers',
+        'retention': timedelta(days=7),
+        'trending_bucket': False,
+        'downsample_bucket': False
     },
     # 'history': {
     #     'name': 'history',
@@ -194,7 +205,7 @@ async def init_influx():
                         b = baseTable
                             |> filter(fn: (r) => r["_field"] == "sentiment_raw")
                             |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                            |> aggregateWindow(fn: median, every: _window, createEmpty: false)
+                            |> aggregateWindow(fn: mean, every: _window, createEmpty: false)
                             |> group()
                             |> map(fn: (r) => ({r with _value: float(v: r._value)}))
                             |> keep(columns: ["_value", "_time", "_field", "doi", "_measurement"])
@@ -202,7 +213,7 @@ async def init_influx():
                         c = baseTable
                             |> filter(fn: (r) => r["_field"] == "contains_abstract_raw")
                             |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                            |> aggregateWindow(fn: median, every: _window, createEmpty: false)
+                            |> aggregateWindow(fn: mean, every: _window, createEmpty: false)
                             |> group()
                             |> map(fn: (r) => ({r with _value: float(v: r._value)}))
                             |> keep(columns: ["_value", "_time", "_field", "doi", "_measurement"])
@@ -235,7 +246,7 @@ async def init_influx():
                         f = baseTable
                             |> filter(fn: (r) => r["_field"] == "length")
                             |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                            |> aggregateWindow(fn: median, every: _window, createEmpty: false)
+                            |> aggregateWindow(fn: mean, every: _window, createEmpty: false)
                             |> group()
                             |> map(fn: (r) => ({r with _value: float(v: r._value)}))
                             |> keep(columns: ["_value", "_time", "_field", "doi", "_measurement"])
@@ -267,10 +278,108 @@ async def init_influx():
                 task = Task(id=0, name=name, org_id=org_obj.id, status="active", flux=flux)
 
                 task = tasks_api.create_task(task)
-                # task = tasks_api.create_task_every(name="task_" + item['downsample_bucket'], flux=task, every=every,
-                #                                    organization=org_obj)
 
+                print('create numbers task')
 
+                every = str(int(item['numbers_window'].total_seconds() // 60)) + "m"
+                name = "task_numbers_" + item['name']
+
+                flux = '''
+                    import "date"
+                    import "math"
+                    import "experimental"
+                    option task = { 
+                      name: "''' + name + '''",
+                      every: ''' + every + '''
+                    }
+                    
+                '''
+                flux += """
+                            _start = """ + str(int(item['duration'].total_seconds())) + """s
+                            _stop = now()
+                            _bucket = """ + '"' + item['name'] + '"' + """
+                            
+                            numbers = (tables=<-, field_selector, aggregator, bucket, name) => 
+                              tables
+                                 |> filter(fn: (r) => r["_field"] == field_selector)
+                                 |> group()
+                                 |> aggregator()
+                                 |> keep(columns: ["_value"])
+                                 |> toFloat()
+                                 |> set(key: "_measurement", value: bucket)
+                                 |> set(key: "_field", value: name)
+                                 |> map(fn: (r) => ({ r with _time: now() }))
+                            
+                            aa = from(bucket: _bucket)
+                              |> range(start: _start, stop: _stop)
+                              |> filter(fn: (r) => r["_measurement"] == "trending")
+                              |> numbers(aggregator: experimental.mean, field_selector: "bot_rating", bucket: _bucket, name: "bot_rating")
+                             
+                            ab = from(bucket: _bucket)
+                              |> range(start: _start, stop: _stop)
+                              |> filter(fn: (r) => r["_measurement"] == "trending")
+                              |> numbers(aggregator: experimental.mean, field_selector: "contains_abstract_raw", bucket: _bucket, name: "contains_abstract_raw")
+                             
+                            ac = from(bucket: _bucket)
+                              |> range(start: _start, stop: _stop)
+                              |> filter(fn: (r) => r["_measurement"] == "trending")
+                              |> numbers(aggregator: experimental.mean, field_selector: "exclamations", bucket: _bucket, name: "exclamations")
+                             
+                            ad = from(bucket: _bucket)
+                              |> range(start: _start, stop: _stop)
+                              |> filter(fn: (r) => r["_measurement"] == "trending")
+                              |> numbers(aggregator: sum, field_selector: "followers", bucket: _bucket, name: "followers")
+                             
+                            ae = from(bucket: _bucket)
+                              |> range(start: _start, stop: _stop)
+                              |> filter(fn: (r) => r["_measur,,ement"] == "trending")
+                              |> numbers(aggregator: experimental.mean, field_select,,or: "length", bucket: _bucket, name: "length")
+                             
+                            af =from(bucket: _bucket)
+                              |> range(start: _start, stop: _stop)
+                              |> filter(fn: (r) => r["_measurement"] == "trending")
+                              |> numbers(aggregator: experimental.mean, field_selector: "questions", bucket: _bucket, name: "questions")
+                             
+                            ag = from(bucket: _bucket)
+                              |> range(start: _start, stop: _stop)
+                              |> filter(fn: (r) => r["_measurement"] == "trending")
+                              |> numbers(aggregator: sum, field_selector: "score", bucket: _bucket, name: "score")
+                             
+                            ah = from(bucket: _bucket)
+                              |> range(start: _start, stop: _stop)
+                              |> filter(fn: (r) => r["_measurement"] == "trending")
+                              |> numbers(aggregator: experimental.mean, field_selector: "sentiment_raw", bucket: _bucket, name: "sentiment_raw")
+                             
+                            ai = from(bucket: _bucket)
+                              |> range(start: _start, stop: _stop)
+                              |> filter(fn: (r) => r["_measurement"] == "trending")
+                              |> numbers(aggregator: count, field_selector: "score", bucket: _bucket, name: "count")
+                             
+                            aj = from(bucket: _bucket)
+                              |> range(start: _start, stop: _stop)
+                              |> filter(fn: (r) => r["_measurement"] == "trending")
+                              |> filter(fn: (r) => r["_field"] == "score")
+                              |> group()
+                              |> distinct(column: "doi")
+                              |> count()
+                              |> keep(columns: ["_value"])
+                              |> toFloat()
+                              |> set(key: "_measurement", value: _bucket)
+                              |> set(key: "_field", value: "pub_count")
+                              |> map(fn: (r) => ({ r with _time: now() }))
+                             
+                             union(tables: [aa, ab, ac, ad, ae, af, ag, ah, ai, aj])
+                              |> to(bucket: "numbers", org: "ambalytics")"""
+                # print(name)
+                # print(org_obj.id)
+                # print(flux)
+                task = Task(id=1, name=name, org_id=org_obj.id, status="active", flux=flux)
+                task = tasks_api.create_task(task)
+
+# not in influx because
+# need dois (-)
+# need trend calc (+)
+# subject to change
 async def run_trend_calculation(trending_time):
     loop = asyncio.get_event_loop()
     # Using None will create a ThreadPoolExecutor
@@ -308,7 +417,8 @@ async def trend_calc_year():
     await run_trend_calculation(trending_time_definition['year'])
 
 
-@app.crontab('0 8 * * *')
+# time is utc
+@app.crontab('0 6 * * *')
 async def hot_papers():
     query = """
             SELECT ROW_NUMBER() OVER (ORDER BY t.score DESC) as trending_ranking, *
@@ -371,6 +481,13 @@ def smart_truncate(content, length=100, suffix=' (...)'):
 
 
 def get_doi_list_trending(trending):
+    """
+    Return a list of dois that have the required min count for the trending definition given.
+    It will use the count of datapoints not the actual tweet count.
+
+    :param trending:
+    :return:
+    """
     p = {"_bucket": trending['name'],
          "_min_count": trending['min_count'],
          "_start": trending['duration'],
@@ -522,7 +639,7 @@ def get_base_trend_table(trending):
                     mean = baseTable
                         |> filter(fn: (r) => r["_field"] == "score")
                         |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                        |> median()
+                        |> experimental.mean()
                         |> group()
                         |> keep(columns: ["_value", "doi"])
                         |> rename(columns: {_value: "mean"})
@@ -569,15 +686,15 @@ def get_base_trend_table(trending):
                     b = baseTable
                       |> filter(fn: (r) => r["_field"] == "sentiment_raw")
                       |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                      |> median()
+                      |> experimental.mean()
                       |> group()
                       |> keep(columns: ["_value", "doi"])
-                      |> rename(columns: {_value: "median_sentiment"})
+                      |> rename(columns: {_value: "mean_sentiment"})
                     
                     c = baseTable
                       |> filter(fn: (r) => r["_field"] == "contains_abstract_raw")
                       |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                      |> median()
+                      |> experimental.mean()
                       |> group()
                       |> keep(columns: ["_value", "doi"])
                       |> rename(columns: {_value: "contains_abstract_raw"})
@@ -601,7 +718,7 @@ def get_base_trend_table(trending):
                     f = baseTable
                       |> filter(fn: (r) => r["_field"] == "length")
                       |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                      |> median()
+                      |> experimental.mean()
                       |> group()
                       |> keep(columns: ["_value", "doi"])
                       |> rename(columns: {_value: "length"})
@@ -609,10 +726,10 @@ def get_base_trend_table(trending):
                     g = baseTable
                       |> filter(fn: (r) => r["_field"] == "length")
                       |> map(fn: (r) => ({r with _value: math.round(x: float(v: uint(v: now()) - uint(v: r._time)) / (10.0 ^ 9.0)) }))
-                      |> median()
+                      |> experimental.mean()
                       |> group()
                       |> keep(columns: ["_value", "doi"])
-                      |> rename(columns: {_value: "median_age"})
+                      |> rename(columns: {_value: "mean_age"})
                     
                     j = baseTable
                       |> filter(fn: (r) => r["_field"] == "length")
@@ -679,7 +796,6 @@ def get_base_trend_table(trending):
             '''
         a = time.time()
         tables = query_api.query(query, params=p)
-        # print(time.time() - a)
         # print(query)
 
         # print('done pubs')
@@ -690,6 +806,7 @@ def get_base_trend_table(trending):
         frames = get_dataframes(trending)
         trend = calculate_trend(frames)
 
+        print(time.time() - a)
         # print('done trends ' + trending['name'])
 
         delete_trending_table(session, trending['name'])
@@ -706,10 +823,10 @@ def get_base_trend_table(trending):
                 t_obj = Trending(publication_doi=record['doi'],
                                  duration=trending['name'],
                                  score=record['score'], count=record['count'],
-                                 median_sentiment=record['median_sentiment'],
+                                 mean_sentiment=record['mean_sentiment'],
                                  sum_followers=record['sum_followers'],
-                                 median_age=record['median_age'],
-                                 median_length=record['length'],
+                                 mean_age=record['mean_age'],
+                                 mean_length=record['length'],
                                  mean_questions=record['questions'],
                                  mean_exclamations=record['exclamations'],
                                  abstract_difference=record['contains_abstract_raw'],
@@ -759,10 +876,10 @@ def save_trend_to_influx(record, trending_value, bucket):
         "fields": {
             "score": record['score'],
             "count": record['count'],
-            "median_sentiment": record['median_sentiment'],
+            "mean_sentiment": record['mean_sentiment'],
             "sum_follower": record['sum_followers'],
-            "median_age": record['median_age'],
-            "median_length": record['length'],
+            "mean_age": record['mean_age'],
+            "mean_length": record['length'],
             "mean_questions": record['questions'],
             "mean_exclamations": record['exclamations'],
             "abstract_difference": record['contains_abstract_raw'],
@@ -803,6 +920,10 @@ def save_data_to_influx(data):
             "questions": data['subj']['processed']['question_mark_count'],
             "exclamations": data['subj']['processed']['exclamation_mark_count'],
             "bot_rating": data['subj']['processed']['bot_rating'],
+            "time_score": data['subj']['processed']['time_score'],
+            "type_factor": data['subj']['processed']['type_factor'],
+            "user_score": data['subj']['processed']['user_score'],
+            "content_score": data['subj']['processed']['content_score']
         },
         "time": createdAt}
 
