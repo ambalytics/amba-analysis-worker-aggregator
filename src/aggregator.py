@@ -437,7 +437,7 @@ async def hot_papers():
             ORDER BY trending_ranking LIMIT 3;
     """
     duration = trending_time_definition['today']['name']
-    fos_id = 21
+    fos_id = 31
     params = {'duration': duration, 'fos_id': fos_id}
 
     s = text(query).bindparams(bindparam('duration'), bindparam('fos_id'))
