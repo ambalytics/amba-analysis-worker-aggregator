@@ -353,7 +353,7 @@ async def init_influx():
                             ai = from(bucket: _bucket)
                               |> range(start: _start, stop: _stop)
                               |> filter(fn: (r) => r["_measurement"] == "trending")
-                              |> numbers(aggregator: count, field_selector: "score", bucket: _bucket, name: "count")
+                              |> numbers(aggregator: sum, field_selector: "count", bucket: _bucket, name: "count")
                              
                             aj = from(bucket: _bucket)
                               |> range(start: _start, stop: _stop)
@@ -935,7 +935,8 @@ def save_data_to_influx(data):
             "time_score": float(data['subj']['processed']['time_score']),
             "type_factor": float(data['subj']['processed']['type_factor']),
             "user_score": float(data['subj']['processed']['user_score']),
-            "content_score": float(data['subj']['processed']['content_score'])
+            "content_score": float(data['subj']['processed']['content_score']),
+            "count": 1
         },
         "time": createdAt}
 
