@@ -301,6 +301,13 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#aggregator.trend_calc_currently" class="md-nav__link">
+    trend_calc_currently()
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -349,6 +356,13 @@
         <li class="md-nav__item">
   <a href="#aggregator.get_doi_list_trending" class="md-nav__link">
     get_doi_list_trending()
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aggregator.trend_calc_currently" class="md-nav__link">
+    trend_calc_currently()
   </a>
   
 </li>
@@ -470,6 +484,41 @@ It will use the count of datapoints not the actual tweet count.</p>
 
 
 
+
+
+
+  <div class="doc doc-object doc-function">
+
+
+
+<h2 id="aggregator.trend_calc_currently" class="doc doc-heading">
+<code class="highlight language-python"><span class="n">trend_calc_currently</span><span class="p">()</span></code>
+
+  <span class="doc doc-properties">
+      <small class="doc doc-property doc-property-async"><code>async</code></small>
+  </span>
+
+</h2>
+
+    <div class="doc doc-contents ">
+
+      <p>run trend calculation in the defined interval</p>
+
+        <details class="quote">
+          <summary>Source code in <code>src/aggregator.py</code></summary>
+          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">timer</span><span class="p">(</span><span class="n">interval</span><span class="o">=</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;currently&#39;</span><span class="p">][</span><span class="s1">&#39;trending_interval&#39;</span><span class="p">])</span>
+<span class="k">async</span> <span class="k">def</span> <span class="nf">trend_calc_currently</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    run trend calculation in the defined interval</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;calc trend currently&#39;</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">run_trend_calculation</span><span class="p">(</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;currently&#39;</span><span class="p">])</span>
+</code></pre></div>
+        </details>
+    </div>
+
+  </div>
 
 
 
