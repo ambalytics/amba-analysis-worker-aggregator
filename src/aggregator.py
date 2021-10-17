@@ -3,7 +3,7 @@ import os
 import sentry_sdk
 import time
 from datetime import timedelta, datetime
-from influxdb_client.client.write_api import ASYNCHRONOUS
+from influxdb_client.client.write_api import SYNCHRONOUS
 import asyncio
 from event_stream import dao
 from event_stream.models.model import *
@@ -39,7 +39,7 @@ aggregated_topic = app.topic('events_aggregated')
 org = os.environ.get('INFLUXDB_V2_ORG', 'ambalytics')
 
 client = InfluxDBClient.from_env_properties()
-write_api = client.write_api(write_options=ASYNCHRONOUS)
+write_api = client.write_api(write_options=SYNCHRONOUS)
 query_api = client.query_api()
 
 trending_time_definition = {
@@ -79,7 +79,7 @@ trending_time_definition = {
         'retention': timedelta(days=7, hours=1),
         'window_size': timedelta(minutes=168),
         'window_count': 60,
-        'min_count': 30, # max 504
+        'min_count': 30,  # max 504
         'trending_interval': timedelta(hours=6),
         'downsample_bucket': 'month',
         'downsample_window': timedelta(hours=2),
@@ -93,7 +93,7 @@ trending_time_definition = {
         'retention': timedelta(days=30, hours=1),
         'window_size': timedelta(minutes=720),
         'window_count': 60,
-        'min_count': 30, # max 360
+        'min_count': 30,  # max 360
         'trending_interval': timedelta(hours=24),
         'downsample_bucket': 'year',
         'downsample_window': timedelta(hours=24),
@@ -107,7 +107,7 @@ trending_time_definition = {
         'retention': timedelta(days=365, hours=1),
         'window_size': timedelta(minutes=8760),
         'window_count': 60,
-        'min_count': 30, # max 365
+        'min_count': 30,  # max 365
         'trending_interval': timedelta(days=3),
         'downsample_bucket': 'history',
         'downsample_window': timedelta(days=3),
@@ -376,6 +376,7 @@ async def init_influx():
                 task = Task(id=1, name=name, org_id=org_obj.id, status="active", flux=flux)
                 task = tasks_api.create_task(task)
 
+
 # not in influx because
 # need dois (-)
 # need trend calc (+)
@@ -389,6 +390,10 @@ async def run_trend_calculation(trending_time):
 
 @app.timer(interval=trending_time_definition['currently']['trending_interval'])
 async def trend_calc_currently():
+    """
+    run trend calculation in the defined interval
+
+    """
     print('calc trend currently')
     await run_trend_calculation(trending_time_definition['currently'])
 
@@ -899,6 +904,13 @@ def save_trend_to_influx(record, trending_value, bucket):
     write_api.write(bucket, org, [point])
 
 
+async def write_event(data):
+    loop = asyncio.get_event_loop()
+    # Using None will create a ThreadPoolExecutor
+    # you can also pass in an executor (Thread or Process)
+    await loop.run_in_executor(None, save_data_to_influx, data)
+
+
 def save_data_to_influx(data):
     doi = data['obj']['data']['doi']
     createdAt = data['timestamp']
@@ -910,7 +922,7 @@ def save_data_to_influx(data):
             "doi": doi
         },
         "fields": {
-            "score": score,
+            "score": float(score),
             "contains_abstract_raw": float(
                 data['subj']['processed']['contains_abstract_raw']) if 'contains_abstract_raw' in data['subj'][
                 'processed'] else 0.0,
@@ -920,14 +932,13 @@ def save_data_to_influx(data):
             "questions": data['subj']['processed']['question_mark_count'],
             "exclamations": data['subj']['processed']['exclamation_mark_count'],
             "bot_rating": data['subj']['processed']['bot_rating'],
-            "time_score": data['subj']['processed']['time_score'],
-            "type_factor": data['subj']['processed']['type_factor'],
-            "user_score": data['subj']['processed']['user_score'],
-            "content_score": data['subj']['processed']['content_score']
+            "time_score": float(data['subj']['processed']['time_score']),
+            "type_factor": float(data['subj']['processed']['type_factor']),
+            "user_score": float(data['subj']['processed']['user_score']),
+            "content_score": float(data['subj']['processed']['content_score'])
         },
         "time": createdAt}
 
-    # print(point)
     write_api.write('currently', org, [point])
 
 
@@ -951,7 +962,7 @@ async def aggregate(events):
         events: events from topic
     """
     async for event in events:
-        save_data_to_influx(event)
+        await write_event(event)
 
 
 if __name__ == '__main__':
