@@ -426,32 +426,37 @@ async def trend_calc_year():
 @app.crontab('0 6 * * *')
 async def hot_papers():
     query = """
-            SELECT ROW_NUMBER() OVER (ORDER BY t.score DESC) as trending_ranking, *
-            FROM (SELECT distinct on (p.id) score, p.*, a.name
-                  FROM trending t
-                       JOIN publication p on p.doi = t.publication_doi
-                       JOIN publication_field_of_study pfos on p.doi = pfos.publication_doi
-                       JOIN publication_author pa on pfos.publication_doi = pa.publication_doi
-                       JOIN author a on pa.author_id = a.id
-                WHERE duration = :duration AND field_of_study_id = :fos_id) t
-            ORDER BY trending_ranking LIMIT 3;
+            SELECT t.*
+            FROM (
+                     SELECT ROW_NUMBER() OVER (ORDER BY t.score DESC) as trending_ranking, *
+                     FROM (SELECT distinct on (p.id) score, p.*, a.name
+                           FROM trending t
+                                    JOIN publication p on p.doi = t.publication_doi
+                                    JOIN publication_author pa on p.doi = pa.publication_doi
+                                    JOIN author a on pa.author_id = a.id
+                            WHERE duration='today'
+                          ) t
+                     ORDER BY trending_ranking
+                 ) t
+                     INNER JOIN (
+                         SELECT DISTINCT publication_doi FROM discussion_data_point ddp
+                            JOIN discussion_data dd ON dd.id = ddp.discussion_data_point_id
+                         WHERE value LIKE '%COVID%') ddp
+                                ON t.doi = ddp.publication_doi
+            ORDER BY trending_ranking
+            LIMIT 3;
     """
-    duration = trending_time_definition['today']['name']
-    fos_id = 31
-    params = {'duration': duration, 'fos_id': fos_id}
-
-    s = text(query).bindparams(bindparam('duration'), bindparam('fos_id'))
-
+    s = text(query)
     session_factory = sessionmaker(bind=DAO.engine)
     Session = scoped_session(session_factory)
     session = Session()
-    result = session.execute(s, params).fetchall()
+    result = session.execute(s).fetchall()
 
     length = 40
     end = 4
     pretext = ""
     while end > 0:
-        pretext = 'Todays trending papers in general medicine:'
+        pretext = 'Todays trending COVID-19 papers:'
         for r in result:
             pretext += "\n" + str(r['trending_ranking']) + '. ' + r['name'].split(' ')[-1] + ' et al. ' \
                        + smart_truncate(r['title'], length)
