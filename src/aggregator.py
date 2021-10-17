@@ -456,7 +456,7 @@ async def hot_papers():
     end = 4
     pretext = ""
     while end > 0:
-        pretext = 'Todays trending papers in general medicine:'
+        pretext = 'Todays trending COVID-19 papers:'
         for r in result:
             pretext += "\n" + str(r['trending_ranking']) + '. ' + r['name'].split(' ')[-1] + ' et al. ' \
                        + smart_truncate(r['title'], length)
