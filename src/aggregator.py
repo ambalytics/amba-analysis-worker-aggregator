@@ -66,7 +66,7 @@ trending_time_definition = {
         'window_size': timedelta(minutes=24),
         'window_count': 60,
         'min_count': 30,  # max 576
-        'trending_interval': timedelta(minutes=45),
+        'trending_interval': timedelta(minutes=10),
         'downsample_bucket': 'week',
         'downsample_window': timedelta(minutes=20),
         'numbers_window': timedelta(minutes=2)
