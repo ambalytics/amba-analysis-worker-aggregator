@@ -884,23 +884,23 @@ def save_trend_to_influx(record, trending_value, bucket):
             "doi": record['doi']
         },
         "fields": {
-            "score": record['score'],
+            "score": float(record['score']),
             "count": record['count'],
-            "mean_sentiment": record['mean_sentiment'],
+            "mean_sentiment": float(record['mean_sentiment']),
             "sum_follower": record['sum_followers'],
-            "mean_age": record['mean_age'],
-            "mean_length": record['length'],
-            "mean_questions": record['questions'],
-            "mean_exclamations": record['exclamations'],
-            "abstract_difference": record['contains_abstract_raw'],
-            "mean_bot_rating": record['mean_bot_rating'],
-            "ema": record['ema'],
-            "kama": record['kama'],
-            "ker": record['ker'],
-            "mean_score": record['mean'],
-            "stddev": record['stddev'],
-            "trending": trending_value,
-            "projected_change": record['prediction']
+            "mean_age": float(record['mean_age']),
+            "mean_length": float(record['length']),
+            "mean_questions": float(record['questions']),
+            "mean_exclamations": float(record['exclamations']),
+            "abstract_difference": float(record['contains_abstract_raw']),
+            "mean_bot_rating": float(record['mean_bot_rating']),
+            "ema": float(record['ema']),
+            "kama": float(record['kama']),
+            "ker": float(record['ker']),
+            "mean_score": float(record['mean']),
+            "stddev": float(record['stddev']),
+            "trending": float(trending_value),
+            "projected_change": float(record['prediction'])
         },
         "time": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')}
 
