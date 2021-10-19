@@ -302,6 +302,13 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#aggregator.hot_papers" class="md-nav__link">
+    hot_papers()
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#aggregator.trend_calc_currently" class="md-nav__link">
     trend_calc_currently()
   </a>
@@ -356,6 +363,13 @@
         <li class="md-nav__item">
   <a href="#aggregator.get_doi_list_trending" class="md-nav__link">
     get_doi_list_trending()
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aggregator.hot_papers" class="md-nav__link">
+    hot_papers()
   </a>
   
 </li>
@@ -478,6 +492,104 @@ It will use the count of datapoints not the actual tweet count.</p>
 
   </div>
 
+
+
+  <div class="doc doc-object doc-function">
+
+
+
+<h2 id="aggregator.hot_papers" class="doc doc-heading">
+<code class="highlight language-python"><span class="n">hot_papers</span><span class="p">()</span></code>
+
+  <span class="doc doc-properties">
+      <small class="doc doc-property doc-property-async"><code>async</code></small>
+  </span>
+
+</h2>
+
+    <div class="doc doc-contents ">
+
+      <p>get only papers that have covid as a top3 entity</p>
+
+        <details class="quote">
+          <summary>Source code in <code>src/aggregator.py</code></summary>
+          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">crontab</span><span class="p">(</span><span class="s1">&#39;0 6 * * *&#39;</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span> <span class="nf">hot_papers</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    get only papers that have covid as a top3 entity</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">query</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">            SELECT t.*</span>
+<span class="s2">            FROM (</span>
+<span class="s2">                     SELECT ROW_NUMBER() OVER (ORDER BY t.score DESC) as trending_ranking, *</span>
+<span class="s2">                     FROM (SELECT distinct on (p.id) score, p.*, a.name</span>
+<span class="s2">                           FROM trending t</span>
+<span class="s2">                                    JOIN publication p on p.doi = t.publication_doi</span>
+<span class="s2">                                    JOIN publication_author pa on p.doi = pa.publication_doi</span>
+<span class="s2">                                    JOIN author a on pa.author_id = a.id</span>
+<span class="s2">                           WHERE duration = &#39;today&#39;</span>
+<span class="s2">                          ) t</span>
+<span class="s2">                     ORDER BY trending_ranking</span>
+<span class="s2">                 ) t</span>
+<span class="s2">                     INNER JOIN (</span>
+<span class="s2">                        SELECT publication_doi</span>
+<span class="s2">                        FROM (</span>
+<span class="s2">                                 SELECT value,</span>
+<span class="s2">                                        count,</span>
+<span class="s2">                                        publication_doi,</span>
+<span class="s2">                                        rank() over (partition by publication_doi order by publication_doi, count desc) rn</span>
+<span class="s2">                                 FROM (</span>
+<span class="s2">                                          SELECT publication_doi, SUM(ddp.count) as count, dd.value</span>
+<span class="s2">                                          FROM discussion_data_point as ddp</span>
+<span class="s2">                                                   JOIN discussion_data as dd ON (ddp.discussion_data_point_id = dd.id)</span>
+<span class="s2">                                          WHERE type = &#39;entity&#39;</span>
+<span class="s2">                                          GROUP BY (dd.value, publication_doi)</span>
+<span class="s2">                                          ORDER BY count DESC) AS temp1) as temp2</span>
+<span class="s2">                        WHERE value LIKE &#39;%COVID-19%&#39; AND rn &lt;= 3</span>
+<span class="s2">                ) ddp ON t.doi = ddp.publication_doi</span>
+<span class="s2">            ORDER BY trending_ranking</span>
+<span class="s2">            LIMIT 3;</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">text</span><span class="p">(</span><span class="n">query</span><span class="p">)</span>
+    <span class="n">session_factory</span> <span class="o">=</span> <span class="n">sessionmaker</span><span class="p">(</span><span class="n">bind</span><span class="o">=</span><span class="n">DAO</span><span class="o">.</span><span class="n">engine</span><span class="p">)</span>
+    <span class="n">Session</span> <span class="o">=</span> <span class="n">scoped_session</span><span class="p">(</span><span class="n">session_factory</span><span class="p">)</span>
+    <span class="n">session</span> <span class="o">=</span> <span class="n">Session</span><span class="p">()</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">s</span><span class="p">)</span><span class="o">.</span><span class="n">fetchall</span><span class="p">()</span>
+
+    <span class="n">length</span> <span class="o">=</span> <span class="mi">40</span>
+    <span class="n">end</span> <span class="o">=</span> <span class="mi">4</span>
+    <span class="n">pretext</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">while</span> <span class="n">end</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">pretext</span> <span class="o">=</span> <span class="s1">&#39;Todays trending COVID-19 papers:&#39;</span>
+        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">result</span><span class="p">:</span>
+            <span class="n">pretext</span> <span class="o">+=</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;trending_ranking&#39;</span><span class="p">])</span> <span class="o">+</span> <span class="s1">&#39;. &#39;</span> <span class="o">+</span> <span class="n">r</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="s1">&#39; et al. &#39;</span> \
+                       <span class="o">+</span> <span class="n">smart_truncate</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;title&#39;</span><span class="p">],</span> <span class="n">length</span><span class="p">)</span>
+        <span class="n">pretext</span> <span class="o">+=</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">https://bit.ly/3ADeaMK&#39;</span>
+
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">pretext</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">280</span><span class="p">:</span>
+            <span class="n">length</span> <span class="o">-=</span> <span class="mi">10</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">break</span>
+        <span class="n">end</span> <span class="o">-=</span> <span class="mi">1</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="n">pretext</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">pretext</span><span class="p">))</span>
+
+    <span class="k">if</span> <span class="mi">100</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">pretext</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">280</span><span class="p">:</span>
+        <span class="n">consumer_key</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;CONSUMER_KEY_TWITTER_BOT&#39;</span><span class="p">)</span>
+        <span class="n">consumer_secret</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;CONSUMER_SECRET_TWITTER_BOT&#39;</span><span class="p">)</span>
+        <span class="n">access_token</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;ACCESS_TOKEN_TWITTER_BOT&#39;</span><span class="p">)</span>
+        <span class="n">access_token_secret</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;ACCESS_TOKEN_SECRET_TWITTER_BOT&#39;</span><span class="p">)</span>
+        <span class="n">auth</span> <span class="o">=</span> <span class="n">tweepy</span><span class="o">.</span><span class="n">OAuthHandler</span><span class="p">(</span><span class="n">consumer_key</span><span class="p">,</span> <span class="n">consumer_secret</span><span class="p">)</span>
+        <span class="n">auth</span><span class="o">.</span><span class="n">set_access_token</span><span class="p">(</span><span class="n">access_token</span><span class="p">,</span> <span class="n">access_token_secret</span><span class="p">)</span>
+        <span class="n">api</span> <span class="o">=</span> <span class="n">tweepy</span><span class="o">.</span><span class="n">API</span><span class="p">(</span><span class="n">auth</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">api</span><span class="o">.</span><span class="n">verify_credentials</span><span class="p">()</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+        <span class="n">api</span><span class="o">.</span><span class="n">update_status</span><span class="p">(</span><span class="n">status</span><span class="o">=</span><span class="n">pretext</span><span class="p">)</span>
+</code></pre></div>
+        </details>
+    </div>
+
+  </div>
 
 
 
