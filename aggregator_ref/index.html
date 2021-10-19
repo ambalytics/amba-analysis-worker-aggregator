@@ -315,6 +315,34 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#aggregator.trend_calc_month" class="md-nav__link">
+    trend_calc_month()
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aggregator.trend_calc_today" class="md-nav__link">
+    trend_calc_today()
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aggregator.trend_calc_week" class="md-nav__link">
+    trend_calc_week()
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aggregator.trend_calc_year" class="md-nav__link">
+    trend_calc_year()
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -377,6 +405,34 @@
         <li class="md-nav__item">
   <a href="#aggregator.trend_calc_currently" class="md-nav__link">
     trend_calc_currently()
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aggregator.trend_calc_month" class="md-nav__link">
+    trend_calc_month()
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aggregator.trend_calc_today" class="md-nav__link">
+    trend_calc_today()
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aggregator.trend_calc_week" class="md-nav__link">
+    trend_calc_week()
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aggregator.trend_calc_year" class="md-nav__link">
+    trend_calc_year()
   </a>
   
 </li>
@@ -620,10 +676,7 @@ It will use the count of datapoints not the actual tweet count.</p>
           <summary>Source code in <code>src/aggregator.py</code></summary>
           <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">timer</span><span class="p">(</span><span class="n">interval</span><span class="o">=</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;currently&#39;</span><span class="p">][</span><span class="s1">&#39;trending_interval&#39;</span><span class="p">])</span>
 <span class="k">async</span> <span class="k">def</span> <span class="nf">trend_calc_currently</span><span class="p">():</span>
-    <span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    run trend calculation in the defined interval</span>
-
-<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="sd">&quot;&quot;&quot;run trend calculation in the defined interval&quot;&quot;&quot;</span>
     <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;calc trend currently&#39;</span><span class="p">)</span>
     <span class="k">await</span> <span class="n">run_trend_calculation</span><span class="p">(</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;currently&#39;</span><span class="p">])</span>
 </code></pre></div>
@@ -634,7 +687,131 @@ It will use the count of datapoints not the actual tweet count.</p>
 
 
 
+  <div class="doc doc-object doc-function">
 
+
+
+<h2 id="aggregator.trend_calc_month" class="doc doc-heading">
+<code class="highlight language-python"><span class="n">trend_calc_month</span><span class="p">()</span></code>
+
+  <span class="doc doc-properties">
+      <small class="doc doc-property doc-property-async"><code>async</code></small>
+  </span>
+
+</h2>
+
+    <div class="doc doc-contents ">
+
+      <p>run trend calculation in the defined interval</p>
+
+        <details class="quote">
+          <summary>Source code in <code>src/aggregator.py</code></summary>
+          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">timer</span><span class="p">(</span><span class="n">interval</span><span class="o">=</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;month&#39;</span><span class="p">][</span><span class="s1">&#39;trending_interval&#39;</span><span class="p">])</span>
+<span class="k">async</span> <span class="k">def</span> <span class="nf">trend_calc_month</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;run trend calculation in the defined interval&quot;&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;calc trend month&#39;</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">run_trend_calculation</span><span class="p">(</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;month&#39;</span><span class="p">])</span>
+</code></pre></div>
+        </details>
+    </div>
+
+  </div>
+
+
+
+  <div class="doc doc-object doc-function">
+
+
+
+<h2 id="aggregator.trend_calc_today" class="doc doc-heading">
+<code class="highlight language-python"><span class="n">trend_calc_today</span><span class="p">()</span></code>
+
+  <span class="doc doc-properties">
+      <small class="doc doc-property doc-property-async"><code>async</code></small>
+  </span>
+
+</h2>
+
+    <div class="doc doc-contents ">
+
+      <p>run trend calculation in the defined interval</p>
+
+        <details class="quote">
+          <summary>Source code in <code>src/aggregator.py</code></summary>
+          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">timer</span><span class="p">(</span><span class="n">interval</span><span class="o">=</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;today&#39;</span><span class="p">][</span><span class="s1">&#39;trending_interval&#39;</span><span class="p">])</span>
+<span class="k">async</span> <span class="k">def</span> <span class="nf">trend_calc_today</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;run trend calculation in the defined interval&quot;&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;calc trend today&#39;</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">run_trend_calculation</span><span class="p">(</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;today&#39;</span><span class="p">])</span>
+</code></pre></div>
+        </details>
+    </div>
+
+  </div>
+
+
+
+  <div class="doc doc-object doc-function">
+
+
+
+<h2 id="aggregator.trend_calc_week" class="doc doc-heading">
+<code class="highlight language-python"><span class="n">trend_calc_week</span><span class="p">()</span></code>
+
+  <span class="doc doc-properties">
+      <small class="doc doc-property doc-property-async"><code>async</code></small>
+  </span>
+
+</h2>
+
+    <div class="doc doc-contents ">
+
+      <p>run trend calculation in the defined interval</p>
+
+        <details class="quote">
+          <summary>Source code in <code>src/aggregator.py</code></summary>
+          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">timer</span><span class="p">(</span><span class="n">interval</span><span class="o">=</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;week&#39;</span><span class="p">][</span><span class="s1">&#39;trending_interval&#39;</span><span class="p">])</span>
+<span class="k">async</span> <span class="k">def</span> <span class="nf">trend_calc_week</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;run trend calculation in the defined interval&quot;&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;calc trend week&#39;</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">run_trend_calculation</span><span class="p">(</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;week&#39;</span><span class="p">])</span>
+</code></pre></div>
+        </details>
+    </div>
+
+  </div>
+
+
+
+  <div class="doc doc-object doc-function">
+
+
+
+<h2 id="aggregator.trend_calc_year" class="doc doc-heading">
+<code class="highlight language-python"><span class="n">trend_calc_year</span><span class="p">()</span></code>
+
+  <span class="doc doc-properties">
+      <small class="doc doc-property doc-property-async"><code>async</code></small>
+  </span>
+
+</h2>
+
+    <div class="doc doc-contents ">
+
+      <p>run trend calculation in the defined interval</p>
+
+        <details class="quote">
+          <summary>Source code in <code>src/aggregator.py</code></summary>
+          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">timer</span><span class="p">(</span><span class="n">interval</span><span class="o">=</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;year&#39;</span><span class="p">][</span><span class="s1">&#39;trending_interval&#39;</span><span class="p">])</span>
+<span class="k">async</span> <span class="k">def</span> <span class="nf">trend_calc_year</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;run trend calculation in the defined interval&quot;&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;calc trend year&#39;</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">run_trend_calculation</span><span class="p">(</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;year&#39;</span><span class="p">])</span>
+</code></pre></div>
+        </details>
+    </div>
+
+  </div>
 
 
 
