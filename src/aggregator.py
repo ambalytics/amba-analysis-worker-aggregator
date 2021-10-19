@@ -80,7 +80,7 @@ trending_time_definition = {
         'window_size': timedelta(minutes=168),
         'window_count': 60,
         'min_count': 30,  # max 504
-        'trending_interval': timedelta(hours=6),
+        'trending_interval': timedelta(hours=1),
         'downsample_bucket': 'month',
         'downsample_window': timedelta(hours=2),
         'numbers_window': timedelta(minutes=20)
@@ -94,7 +94,7 @@ trending_time_definition = {
         'window_size': timedelta(minutes=720),
         'window_count': 60,
         'min_count': 30,  # max 360
-        'trending_interval': timedelta(hours=24),
+        'trending_interval': timedelta(hours=3),
         'downsample_bucket': 'year',
         'downsample_window': timedelta(hours=24),
         'numbers_window': timedelta(hours=2)
@@ -108,7 +108,7 @@ trending_time_definition = {
         'window_size': timedelta(minutes=8760),
         'window_count': 60,
         'min_count': 30,  # max 365
-        'trending_interval': timedelta(days=3),
+        'trending_interval': timedelta(hours=24),
         'downsample_bucket': 'history',
         'downsample_window': timedelta(days=3),
         'numbers_window': timedelta(hours=24)
@@ -390,34 +390,35 @@ async def run_trend_calculation(trending_time):
 
 @app.timer(interval=trending_time_definition['currently']['trending_interval'])
 async def trend_calc_currently():
-    """
-    run trend calculation in the defined interval
-
-    """
+    """run trend calculation in the defined interval"""
     print('calc trend currently')
     await run_trend_calculation(trending_time_definition['currently'])
 
 
 @app.timer(interval=trending_time_definition['today']['trending_interval'])
 async def trend_calc_today():
+    """run trend calculation in the defined interval"""
     print('calc trend today')
     await run_trend_calculation(trending_time_definition['today'])
 
 
 @app.timer(interval=trending_time_definition['week']['trending_interval'])
 async def trend_calc_week():
+    """run trend calculation in the defined interval"""
     print('calc trend week')
     await run_trend_calculation(trending_time_definition['week'])
 
 
 @app.timer(interval=trending_time_definition['month']['trending_interval'])
 async def trend_calc_month():
+    """run trend calculation in the defined interval"""
     print('calc trend month')
     await run_trend_calculation(trending_time_definition['month'])
 
 
 @app.timer(interval=trending_time_definition['year']['trending_interval'])
 async def trend_calc_year():
+    """run trend calculation in the defined interval"""
     print('calc trend year')
     await run_trend_calculation(trending_time_definition['year'])
 
