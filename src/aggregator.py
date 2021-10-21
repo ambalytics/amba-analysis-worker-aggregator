@@ -496,7 +496,7 @@ async def hot_papers():
         for r in result:
             pretext += "\n" + str(r['trending_ranking']) + '. ' + r['name'].split(' ')[-1] + ' et al. ' \
                        + smart_truncate(r['title'], length)
-        pretext += '\nhttps://bit.ly/3ADeaMK'
+        pretext += '\nhttps://bit.ly/3ne4DqQ'
 
         if len(pretext) > 280:
             length -= 10
