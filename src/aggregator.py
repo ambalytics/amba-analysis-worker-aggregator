@@ -119,6 +119,12 @@ trending_time_definition = {
         'trending_bucket': False,
         'downsample_bucket': False
     },
+    'api_monitor': {
+        'name': 'api_monitor',
+        'retention': timedelta(days=7),
+        'trending_bucket': False,
+        'downsample_bucket': False
+    },
     # 'history': {
     #     'name': 'history',
     #     'trending_bucket': 'trending_history',
@@ -386,6 +392,45 @@ async def run_trend_calculation(trending_time):
     # Using None will create a ThreadPoolExecutor
     # you can also pass in an executor (Thread or Process)
     await loop.run_in_executor(None, get_base_trend_table, trending_time)
+    await loop.run_in_executor(None, update_covid_trends)
+
+
+def update_covid_trends():
+    query = """        
+        CREATE MATERIALIZED VIEW IF NOT EXISTS trending_covid_papers AS
+            SELECT t.*
+            FROM (
+                 SELECT rank() over (partition by duration order by score desc) trending_ranking, p.doi, p.pub_date, p.year, p.citation_count, p.title, t.*
+                 FROM trending t
+                     JOIN publication p on p.doi = t.publication_doi
+             ) t
+                 INNER JOIN (
+                    SELECT publication_doi
+                    FROM (
+                             SELECT value,
+                                    count,
+                                    publication_doi,
+                                    rank() over (partition by publication_doi order by publication_doi, count desc) rn
+                             FROM (
+                                      SELECT publication_doi, SUM(ddp.count) as count, dd.value
+                                      FROM discussion_data_point as ddp
+                                               JOIN discussion_data as dd ON (ddp.discussion_data_point_id = dd.id)
+                                      WHERE type = 'entity'
+                                      GROUP BY (dd.value, publication_doi)
+                                      ORDER BY count DESC) AS temp1) as temp2
+                    WHERE value LIKE '%COVID-19%' AND rn <= 3
+                ) ddp ON t.doi = ddp.publication_doi
+            ORDER BY trending_ranking;
+    
+        REFRESH MATERIALIZED VIEW trending_covid_papers;
+    """
+
+    session_factory = sessionmaker(bind=DAO.engine)
+    Session = scoped_session(session_factory)
+    session = Session()
+
+    s = text(query)
+    return session.execute(s)
 
 
 @app.timer(interval=trending_time_definition['currently']['trending_interval'])
