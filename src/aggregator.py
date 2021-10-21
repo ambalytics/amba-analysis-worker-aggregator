@@ -398,15 +398,45 @@ async def run_trend_calculation(trending_time):
 def update_covid_trends():
     print('calc covid trends')
     query = """           
-        REFRESH MATERIALIZED VIEW trending_covid_papers;
+        CREATE MATERIALIZED VIEW IF NOT EXISTS trending_covid_papers AS
+        SELECT t.*
+        FROM (
+                 SELECT rank() over (partition by duration order by score desc) trending_ranking, p.doi, p.pub_date, p.year, p.citation_count, p.title, t.*
+                 FROM trending t
+                     JOIN publication p on p.doi = t.publication_doi
+             ) t
+                 INNER JOIN (
+                    SELECT publication_doi
+                    FROM (
+                             SELECT value,
+                                    count,
+                                    publication_doi,
+                                    rank() over (partition by publication_doi order by publication_doi, count desc) rn
+                             FROM (
+                                      SELECT publication_doi, SUM(ddp.count) as count, dd.value
+                                      FROM discussion_data_point as ddp
+                                               JOIN discussion_data as dd ON (ddp.discussion_data_point_id = dd.id)
+                                      WHERE type = 'entity'
+                                      GROUP BY (dd.value, publication_doi)
+                                      ORDER BY count DESC) AS temp1) as temp2
+                    WHERE value LIKE '%COVID-19%' AND rn <= 3
+                ) ddp ON t.doi = ddp.publication_doi
+        ORDER BY trending_ranking;
+        
+        create unique index if not exists trending_covid_papers_doi_duration_index
+            on trending_covid_papers (publication_doi, duration);
+    
+        REFRESH MATERIALIZED VIEW CONCURRENTLY trending_covid_papers;
     """
 
     session_factory = sessionmaker(bind=DAO.engine)
     Session = scoped_session(session_factory)
     session = Session()
 
+    a = time.time()
     s = text(query)
-    return session.execute(s)
+    session.execute(s)
+    print(time.time() - a)
 
 
 @app.timer(interval=trending_time_definition['currently']['trending_interval'])
