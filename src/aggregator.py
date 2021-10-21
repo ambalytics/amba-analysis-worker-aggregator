@@ -405,8 +405,10 @@ def update_covid_trends():
     Session = scoped_session(session_factory)
     session = Session()
 
+    a = time.time()
     s = text(query)
-    return session.execute(s)
+    session.execute(s)
+    print(time.time() - a)
 
 
 @app.timer(interval=trending_time_definition['currently']['trending_interval'])
