@@ -400,7 +400,7 @@ async def run_trend_calculation(trending_time):
 
 def update_covid_trends():
     print('calc covid trends')
-    query = """           
+    q1 = """           
         CREATE MATERIALIZED VIEW IF NOT EXISTS trending_covid_papers AS
         SELECT t.*
         FROM (
@@ -425,52 +425,58 @@ def update_covid_trends():
                     WHERE value LIKE '%COVID-19%' AND rn <= 3
                 ) ddp ON t.doi = ddp.publication_doi
         ORDER BY trending_ranking;
-        
-        create unique index if not exists trending_covid_papers_doi_duration_index
-            on trending_covid_papers (publication_doi, duration);
-    
+        """
+    q2 = """
+        CREATE UNIQUE INDEX IF NOT EXISTS trending_covid_papers_doi_duration_index
+            ON trending_covid_papers (publication_doi, duration);
+         """
+    q3 = """
         REFRESH MATERIALIZED VIEW CONCURRENTLY trending_covid_papers;
-    """
+        """
 
     session_factory = sessionmaker(bind=DAO.engine)
     Session = scoped_session(session_factory)
     session = Session()
 
     a = time.time()
-    s = text(query)
+    s = text(q1)
+    session.execute(s)
+    s = text(q2)
+    session.execute(s)
+    s = text(q3)
     session.execute(s)
     print(time.time() - a)
 
 
-@app.timer(interval=trending_time_definition['currently']['trending_interval'])
+@app.crontab('*/3 * * * *')
 async def trend_calc_currently():
     """run trend calculation in the defined interval"""
     print('calc trend currently')
     await run_trend_calculation(trending_time_definition['currently'])
 
 
-@app.timer(interval=trending_time_definition['today']['trending_interval'])
+@app.crontab('*/10 * * * *')
 async def trend_calc_today():
     """run trend calculation in the defined interval"""
     print('calc trend today')
     await run_trend_calculation(trending_time_definition['today'])
 
 
-@app.timer(interval=trending_time_definition['week']['trending_interval'])
+@app.crontab('0 * * * *')
 async def trend_calc_week():
     """run trend calculation in the defined interval"""
     print('calc trend week')
     await run_trend_calculation(trending_time_definition['week'])
 
 
-@app.timer(interval=trending_time_definition['month']['trending_interval'])
+@app.crontab('0 */3 * * *')
 async def trend_calc_month():
     """run trend calculation in the defined interval"""
     print('calc trend month')
     await run_trend_calculation(trending_time_definition['month'])
 
 
-@app.timer(interval=trending_time_definition['year']['trending_interval'])
+@app.crontab('1 0 * * *')
 async def trend_calc_year():
     """run trend calculation in the defined interval"""
     print('calc trend year')
@@ -1022,7 +1028,6 @@ def save_data_to_influx(data):
         write_api.write('currently', org, [point])
     except influxdb_client.rest.ApiException:
         print('ApiException')
-
 
 
 def doi_filter_list(doi_list, params):
