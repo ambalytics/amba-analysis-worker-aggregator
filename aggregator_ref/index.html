@@ -674,7 +674,7 @@ It will use the count of datapoints not the actual tweet count.</p>
 
         <details class="quote">
           <summary>Source code in <code>src/aggregator.py</code></summary>
-          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">timer</span><span class="p">(</span><span class="n">interval</span><span class="o">=</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;currently&#39;</span><span class="p">][</span><span class="s1">&#39;trending_interval&#39;</span><span class="p">])</span>
+          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">crontab</span><span class="p">(</span><span class="s1">&#39;*/3 * * * *&#39;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span> <span class="nf">trend_calc_currently</span><span class="p">():</span>
     <span class="sd">&quot;&quot;&quot;run trend calculation in the defined interval&quot;&quot;&quot;</span>
     <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;calc trend currently&#39;</span><span class="p">)</span>
@@ -706,7 +706,7 @@ It will use the count of datapoints not the actual tweet count.</p>
 
         <details class="quote">
           <summary>Source code in <code>src/aggregator.py</code></summary>
-          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">timer</span><span class="p">(</span><span class="n">interval</span><span class="o">=</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;month&#39;</span><span class="p">][</span><span class="s1">&#39;trending_interval&#39;</span><span class="p">])</span>
+          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">crontab</span><span class="p">(</span><span class="s1">&#39;0 */3 * * *&#39;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span> <span class="nf">trend_calc_month</span><span class="p">():</span>
     <span class="sd">&quot;&quot;&quot;run trend calculation in the defined interval&quot;&quot;&quot;</span>
     <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;calc trend month&#39;</span><span class="p">)</span>
@@ -738,7 +738,7 @@ It will use the count of datapoints not the actual tweet count.</p>
 
         <details class="quote">
           <summary>Source code in <code>src/aggregator.py</code></summary>
-          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">timer</span><span class="p">(</span><span class="n">interval</span><span class="o">=</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;today&#39;</span><span class="p">][</span><span class="s1">&#39;trending_interval&#39;</span><span class="p">])</span>
+          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">crontab</span><span class="p">(</span><span class="s1">&#39;*/10 * * * *&#39;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span> <span class="nf">trend_calc_today</span><span class="p">():</span>
     <span class="sd">&quot;&quot;&quot;run trend calculation in the defined interval&quot;&quot;&quot;</span>
     <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;calc trend today&#39;</span><span class="p">)</span>
@@ -770,7 +770,7 @@ It will use the count of datapoints not the actual tweet count.</p>
 
         <details class="quote">
           <summary>Source code in <code>src/aggregator.py</code></summary>
-          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">timer</span><span class="p">(</span><span class="n">interval</span><span class="o">=</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;week&#39;</span><span class="p">][</span><span class="s1">&#39;trending_interval&#39;</span><span class="p">])</span>
+          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">crontab</span><span class="p">(</span><span class="s1">&#39;0 * * * *&#39;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span> <span class="nf">trend_calc_week</span><span class="p">():</span>
     <span class="sd">&quot;&quot;&quot;run trend calculation in the defined interval&quot;&quot;&quot;</span>
     <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;calc trend week&#39;</span><span class="p">)</span>
@@ -802,7 +802,7 @@ It will use the count of datapoints not the actual tweet count.</p>
 
         <details class="quote">
           <summary>Source code in <code>src/aggregator.py</code></summary>
-          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">timer</span><span class="p">(</span><span class="n">interval</span><span class="o">=</span><span class="n">trending_time_definition</span><span class="p">[</span><span class="s1">&#39;year&#39;</span><span class="p">][</span><span class="s1">&#39;trending_interval&#39;</span><span class="p">])</span>
+          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">crontab</span><span class="p">(</span><span class="s1">&#39;1 0 * * *&#39;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span> <span class="nf">trend_calc_year</span><span class="p">():</span>
     <span class="sd">&quot;&quot;&quot;run trend calculation in the defined interval&quot;&quot;&quot;</span>
     <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;calc trend year&#39;</span><span class="p">)</span>
