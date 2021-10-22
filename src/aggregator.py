@@ -435,13 +435,13 @@ def update_covid_trends():
             REFRESH MATERIALIZED VIEW CONCURRENTLY trending_covid_papers;
             """
     a = time.time()
+
+    with DAO.engine.connect() as connection:
+        result = connection.execute(text(q1))
+    with DAO.engine.connect() as connection:
+        result = connection.execute(text(q2))
     with DAO.engine.connect() as connection:
         result = connection.execute(text(q3))
-
-    # result = DAO.engine.execute(q1)
-    # result = DAO.engine.execute(q2)
-    # result = DAO.engine.execute(q3)
-    # result.close()
 
     print(time.time() - a)
 
@@ -462,7 +462,7 @@ async def trend_calc_today():
     await run_trend_calculation(trending_time_definition['today'])
 
 
-@app.crontab('0 * * * *')
+@app.crontab('1 * * * *')
 async def trend_calc_week():
     """run trend calculation in the defined interval"""
     print('calc trend week')
