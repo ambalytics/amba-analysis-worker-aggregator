@@ -3,6 +3,9 @@ import os
 import sentry_sdk
 import time
 from datetime import timedelta, datetime
+
+import urllib3
+import influxdb_client
 from influxdb_client.client.write_api import SYNCHRONOUS
 import asyncio
 from event_stream import dao
@@ -871,54 +874,58 @@ def get_base_trend_table(trending):
     
             '''
         a = time.time()
-        tables = query_api.query(query, params=p)
-        # print(query)
 
-        # print('done pubs')
-        session_factory = sessionmaker(bind=DAO.engine)
-        Session = scoped_session(session_factory)
-        session = Session()
+        try:
+            tables = query_api.query(query, params=p)
+            # print(query)
+        except urllib3.exceptions.ReadTimeoutError:
+            print('ReadTimeoutError')
+        else:
+            # print('done pubs')
+            session_factory = sessionmaker(bind=DAO.engine)
+            Session = scoped_session(session_factory)
+            session = Session()
 
-        frames = get_dataframes(trending)
-        trend = calculate_trend(frames)
+            frames = get_dataframes(trending)
+            trend = calculate_trend(frames)
 
-        print(time.time() - a)
-        # print('done trends ' + trending['name'])
+            print(time.time() - a)
+            # print('done trends ' + trending['name'])
 
-        delete_trending_table(session, trending['name'])
+            delete_trending_table(session, trending['name'])
 
-        trending_objects = []
-        for table in tables:
-            for record in table.records:
-                trending_value = 0
-                if record['doi'] in trend:
-                    trending_value = trend[record['doi']]
+            trending_objects = []
+            for table in tables:
+                for record in table.records:
+                    trending_value = 0
+                    if record['doi'] in trend:
+                        trending_value = trend[record['doi']]
 
-                save_trend_to_influx(record, trending_value, trending['trending_bucket'])
+                    save_trend_to_influx(record, trending_value, trending['trending_bucket'])
 
-                t_obj = Trending(publication_doi=record['doi'],
-                                 duration=trending['name'],
-                                 score=record['score'], count=record['count'],
-                                 mean_sentiment=record['mean_sentiment'],
-                                 sum_followers=record['sum_followers'],
-                                 mean_age=record['mean_age'],
-                                 mean_length=record['length'],
-                                 mean_questions=record['questions'],
-                                 mean_exclamations=record['exclamations'],
-                                 abstract_difference=record['contains_abstract_raw'],
-                                 mean_bot_rating=record['mean_bot_rating'],
-                                 ema=record['ema'],
-                                 kama=record['kama'],
-                                 ker=record['ker'],
-                                 mean_score=record['mean'],
-                                 stddev=record['stddev'],
-                                 trending=trending_value,
-                                 projected_change=record['prediction'])
+                    t_obj = Trending(publication_doi=record['doi'],
+                                     duration=trending['name'],
+                                     score=record['score'], count=record['count'],
+                                     mean_sentiment=record['mean_sentiment'],
+                                     sum_followers=record['sum_followers'],
+                                     mean_age=record['mean_age'],
+                                     mean_length=record['length'],
+                                     mean_questions=record['questions'],
+                                     mean_exclamations=record['exclamations'],
+                                     abstract_difference=record['contains_abstract_raw'],
+                                     mean_bot_rating=record['mean_bot_rating'],
+                                     ema=record['ema'],
+                                     kama=record['kama'],
+                                     ker=record['ker'],
+                                     mean_score=record['mean'],
+                                     stddev=record['stddev'],
+                                     trending=trending_value,
+                                     projected_change=record['prediction'])
 
-                t_obj = save_or_update(session, t_obj, Trending,
-                                       {'publication_doi': t_obj.publication_doi, 'duration': t_obj.duration})
-                trending_objects.append(t_obj)
-        return trending_objects
+                    t_obj = save_or_update(session, t_obj, Trending,
+                                           {'publication_doi': t_obj.publication_doi, 'duration': t_obj.duration})
+                    trending_objects.append(t_obj)
+            return trending_objects
     return []
 
 
@@ -1011,7 +1018,11 @@ def save_data_to_influx(data):
         },
         "time": createdAt}
 
-    write_api.write('currently', org, [point])
+    try:
+        write_api.write('currently', org, [point])
+    except influxdb_client.rest.ApiException:
+        print('ApiException')
+
 
 
 def doi_filter_list(doi_list, params):
