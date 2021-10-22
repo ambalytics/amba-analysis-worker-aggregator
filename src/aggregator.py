@@ -441,11 +441,11 @@ def update_covid_trends():
     a = time.time()
     s = text(q1)
     session.execute(s)
-    print(time.time() - a)
+    # print(time.time() - a)
 
     s = text(q2)
     session.execute(s)
-    print(time.time() - a)
+    # print(time.time() - a)
 
     s = text(q3)
     session.execute(s)
@@ -475,14 +475,14 @@ async def trend_calc_week():
     await run_trend_calculation(trending_time_definition['week'])
 
 
-@app.crontab('0 */3 * * *')
+@app.crontab('5 */3 * * *')
 async def trend_calc_month():
     """run trend calculation in the defined interval"""
     print('calc trend month')
     await run_trend_calculation(trending_time_definition['month'])
 
 
-@app.crontab('1 0 * * *')
+@app.crontab('2 2 * * *')
 async def trend_calc_year():
     """run trend calculation in the defined interval"""
     print('calc trend year')
