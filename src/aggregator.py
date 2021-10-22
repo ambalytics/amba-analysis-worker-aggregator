@@ -462,7 +462,7 @@ async def trend_calc_today():
     await run_trend_calculation(trending_time_definition['today'])
 
 
-@app.crontab('1 * * * *')
+@app.crontab('25 * * * *')
 async def trend_calc_week():
     """run trend calculation in the defined interval"""
     print('calc trend week')
@@ -476,7 +476,7 @@ async def trend_calc_month():
     await run_trend_calculation(trending_time_definition['month'])
 
 
-@app.crontab('2 2 * * *')
+@app.crontab('4 2 * * *')
 async def trend_calc_year():
     """run trend calculation in the defined interval"""
     print('calc trend year')
