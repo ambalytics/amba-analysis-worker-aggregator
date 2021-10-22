@@ -770,7 +770,7 @@ It will use the count of datapoints not the actual tweet count.</p>
 
         <details class="quote">
           <summary>Source code in <code>src/aggregator.py</code></summary>
-          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">crontab</span><span class="p">(</span><span class="s1">&#39;0 * * * *&#39;</span><span class="p">)</span>
+          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">crontab</span><span class="p">(</span><span class="s1">&#39;1 * * * *&#39;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span> <span class="nf">trend_calc_week</span><span class="p">():</span>
     <span class="sd">&quot;&quot;&quot;run trend calculation in the defined interval&quot;&quot;&quot;</span>
     <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;calc trend week&#39;</span><span class="p">)</span>
