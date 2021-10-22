@@ -430,15 +430,18 @@ def update_covid_trends():
         CREATE UNIQUE INDEX IF NOT EXISTS trending_covid_papers_doi_duration_index
             ON trending_covid_papers (publication_doi, duration);
          """
-    q3 = """
-        REFRESH MATERIALIZED VIEW CONCURRENTLY trending_covid_papers;
-        """
-    a = time.time()
 
-    result = DAO.engine.execute(q1)
-    result = DAO.engine.execute(q2)
-    result = DAO.engine.execute(q3)
-    result.close()
+    q3 = """
+            REFRESH MATERIALIZED VIEW CONCURRENTLY trending_covid_papers;
+            """
+    a = time.time()
+    with DAO.engine.connect() as connection:
+        result = connection.execute(text(q3))
+
+    # result = DAO.engine.execute(q1)
+    # result = DAO.engine.execute(q2)
+    # result = DAO.engine.execute(q3)
+    # result.close()
 
     print(time.time() - a)
 
