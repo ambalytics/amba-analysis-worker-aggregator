@@ -433,22 +433,13 @@ def update_covid_trends():
     q3 = """
         REFRESH MATERIALIZED VIEW CONCURRENTLY trending_covid_papers;
         """
-
-    session_factory = sessionmaker(bind=DAO.engine)
-    Session = scoped_session(session_factory)
-    session = Session()
-
     a = time.time()
-    s = text(q1)
-    session.execute(s)
-    print(time.time() - a)
 
-    s = text(q2)
-    session.execute(s)
-    print(time.time() - a)
+    result = DAO.engine.execute(q1)
+    result = DAO.engine.execute(q2)
+    result = DAO.engine.execute(q3)
+    result.close()
 
-    s = text(q3)
-    session.execute(s)
     print(time.time() - a)
 
     return True
@@ -475,14 +466,14 @@ async def trend_calc_week():
     await run_trend_calculation(trending_time_definition['week'])
 
 
-@app.crontab('0 */3 * * *')
+@app.crontab('5 */3 * * *')
 async def trend_calc_month():
     """run trend calculation in the defined interval"""
     print('calc trend month')
     await run_trend_calculation(trending_time_definition['month'])
 
 
-@app.crontab('1 0 * * *')
+@app.crontab('2 2 * * *')
 async def trend_calc_year():
     """run trend calculation in the defined interval"""
     print('calc trend year')
