@@ -441,11 +441,17 @@ def update_covid_trends():
     a = time.time()
     s = text(q1)
     session.execute(s)
+    print(time.time() - a)
+
     s = text(q2)
     session.execute(s)
+    print(time.time() - a)
+
     s = text(q3)
     session.execute(s)
     print(time.time() - a)
+
+    return True
 
 
 @app.crontab('*/3 * * * *')
