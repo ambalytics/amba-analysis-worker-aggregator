@@ -569,8 +569,7 @@ It will use the count of datapoints not the actual tweet count.</p>
 
         <details class="quote">
           <summary>Source code in <code>src/aggregator.py</code></summary>
-          <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">crontab</span><span class="p">(</span><span class="s1">&#39;0 6 * * *&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span> <span class="nf">hot_papers</span><span class="p">():</span>
+          <div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span> <span class="nf">hot_papers</span><span class="p">():</span>
     <span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    get only papers that have covid as a top3 entity</span>
 <span class="sd">    &quot;&quot;&quot;</span>
@@ -620,7 +619,7 @@ It will use the count of datapoints not the actual tweet count.</p>
         <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">result</span><span class="p">:</span>
             <span class="n">pretext</span> <span class="o">+=</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;trending_ranking&#39;</span><span class="p">])</span> <span class="o">+</span> <span class="s1">&#39;. &#39;</span> <span class="o">+</span> <span class="n">r</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="s1">&#39; et al. &#39;</span> \
                        <span class="o">+</span> <span class="n">smart_truncate</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;title&#39;</span><span class="p">],</span> <span class="n">length</span><span class="p">)</span>
-        <span class="n">pretext</span> <span class="o">+=</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">https://bit.ly/3ne4DqQ&#39;</span>
+        <span class="n">pretext</span> <span class="o">+=</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">https://bit.ly/3m4YoWR&#39;</span>
 
         <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">pretext</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">280</span><span class="p">:</span>
             <span class="n">length</span> <span class="o">-=</span> <span class="mi">10</span>
@@ -646,6 +645,9 @@ It will use the count of datapoints not the actual tweet count.</p>
     </div>
 
   </div>
+
+
+
 
 
 
