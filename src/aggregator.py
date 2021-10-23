@@ -485,6 +485,11 @@ async def trend_calc_year():
 
 # time is utc
 @app.crontab('0 6 * * *')
+async def hot_papers_cron():
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, hot_papers)
+
+
 async def hot_papers():
     """
     get only papers that have covid as a top3 entity
@@ -535,7 +540,7 @@ async def hot_papers():
         for r in result:
             pretext += "\n" + str(r['trending_ranking']) + '. ' + r['name'].split(' ')[-1] + ' et al. ' \
                        + smart_truncate(r['title'], length)
-        pretext += '\nhttps://bit.ly/3ne4DqQ'
+        pretext += '\nhttps://bit.ly/3m4YoWR'
 
         if len(pretext) > 280:
             length -= 10
@@ -647,6 +652,10 @@ def get_dataframes(trending):
     return results
 
 
+def split_list(total_list, n):
+    return [total_list[i:i + n] for i in range(0, len(total_list), n)]
+
+
 def get_base_trend_table(trending):
     p = {"_start": trending['duration'],
          "_bucket": trending['name'],
@@ -656,283 +665,293 @@ def get_base_trend_table(trending):
          }
     dois = get_doi_list_trending(trending)
     if len(dois) > 0:
-        filter_obj = doi_filter_list(dois, p)
-        query = '''
-                    import "math"
-                    import "experimental"
-                    
-                    _stop = now()                
-                    baseTable = from(bucket: _bucket)
-                        |> range(start: _start, stop: _stop)
-                        |> filter(fn: (r) => r["_measurement"] == "trending") 
-                '''
-        query += filter_obj['string']
-        query += '''                
-        
-                    windowTable = baseTable
-                        |> filter(fn: (r) => r["_field"] == "score")
-                        |> aggregateWindow(every: _window, fn: sum, createEmpty: true)
-                        |> sort(columns: ["_time"], desc: true)
-                        |> limit(n: _window_count)
-                        |> sort(columns: ["_time"])
-                        |> map(fn:(r) => ({
-                            r with _value:
-                            if exists r._value then r._value
-                            else 0.0
-                        }))
-                        |> keep(columns: ["_time", "_value", "doi"])
-                    
-                    stddev = windowTable
-                        |> stddev()
-                        |> group()
-                        |> keep(columns: ["_value", "doi"])
-                        |> rename(columns: {_value: "stddev"})
-                    
-                    ema = windowTable
-                        |> exponentialMovingAverage(n: _window_count)
-                        |> group()
-                        |> keep(columns: ["_value", "doi"])
-                        |> rename(columns: {_value: "ema"})
-                    
-                    j1 = join(
-                        tables: {stddev:stddev, ema:ema},
-                        on: ["doi"]
-                        )
-                    
-                    ker = windowTable
-                        |> kaufmansER(n: _window_count - 1)
-                        |> group()
-                        |> keep(columns: ["_value", "doi"])
-                        |> rename(columns: {_value: "ker"})
-                    
-                    j2 = join(
-                        tables: {j1:j1, ker:ker},
-                        on: ["doi"]
-                        )
-                    
-                    kama = windowTable
-                        |> kaufmansAMA(n: _window_count -1)
-                        |> group()
-                        |> keep(columns: ["_value", "doi"])
-                        |> rename(columns: {_value: "kama"})
-                    
-                    j3 = join(
-                        tables: {kama:kama, j2:j2},
-                        on: ["doi"]
-                        )
-                    
-                    mean = baseTable
-                        |> filter(fn: (r) => r["_field"] == "score")
-                        |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                        |> experimental.mean()
-                        |> group()
-                        |> keep(columns: ["_value", "doi"])
-                        |> rename(columns: {_value: "mean"})
-                    
-                    j5 = join(
-                        tables: {mean:mean, j3:j3},
-                        on: ["doi"]
-                        )
-                    
-                    prediction = windowTable
-                        |> holtWinters(n: 1,  seasonality: 0, interval: _window, withFit: false, timeColumn: "_time", column: "_value")
-                        |> group()
-                        |> keep(columns: ["_value", "doi"])
-                        |> rename(columns: {_value: "prediction"})
-                    
-                    j6 = join(
-                        tables: {prediction:prediction, j5:j5},
-                        on: ["doi"]
-                        )
-                    
-                    score = baseTable
-                      |> filter(fn: (r) => r["_field"] == "score")
-                      |> keep(columns: ["_value", "_time", "doi"])
-                      |> map(fn:(r) => ({ r with _value: float(v: r._value) * math.exp(x: _exponent * float(v: uint(v: now()) - uint(v: r._time)) / (10.0 ^ 9.0)) }))
-                      |> cumulativeSum(columns: ["_value"])
-                      |> last(column: "_value")
-                      |> keep(columns: ["_value", "doi"])
-                      |> group()
-                      |> rename(columns: {_value: "score"})
-                    
-                    j7 = join(
-                      tables: {j6:j6, score:score},
-                      on: ["doi"]
-                    )
-                    
-                    a = baseTable
-                      |> filter(fn: (r) => r["_field"] == "followers")
-                      |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                      |> sum()
-                      |> group()
-                      |> keep(columns: ["_value", "doi"])
-                      |> rename(columns: {_value: "sum_followers"})
-                    
-                    b = baseTable
-                      |> filter(fn: (r) => r["_field"] == "sentiment_raw")
-                      |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                      |> experimental.mean()
-                      |> group()
-                      |> keep(columns: ["_value", "doi"])
-                      |> rename(columns: {_value: "mean_sentiment"})
-                    
-                    c = baseTable
-                      |> filter(fn: (r) => r["_field"] == "contains_abstract_raw")
-                      |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                      |> experimental.mean()
-                      |> group()
-                      |> keep(columns: ["_value", "doi"])
-                      |> rename(columns: {_value: "contains_abstract_raw"})
-                    
-                    ad = baseTable
-                      |> filter(fn: (r) => r["_field"] == "questions")
-                      |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                      |> experimental.mean()
-                      |> group()
-                      |> keep(columns: ["_value", "doi"])
-                      |> rename(columns: {_value: "questions"})
-                    
-                    e = baseTable
-                      |> filter(fn: (r) => r["_field"] == "exclamations")
-                      |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                      |> experimental.mean()
-                      |> group()
-                      |> keep(columns: ["_value", "doi"])
-                      |> rename(columns: {_value: "exclamations"})
-                    
-                    f = baseTable
-                      |> filter(fn: (r) => r["_field"] == "length")
-                      |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                      |> experimental.mean()
-                      |> group()
-                      |> keep(columns: ["_value", "doi"])
-                      |> rename(columns: {_value: "length"})
-                    
-                    g = baseTable
-                      |> filter(fn: (r) => r["_field"] == "length")
-                      |> map(fn: (r) => ({r with _value: math.round(x: float(v: uint(v: now()) - uint(v: r._time)) / (10.0 ^ 9.0)) }))
-                      |> experimental.mean()
-                      |> group()
-                      |> keep(columns: ["_value", "doi"])
-                      |> rename(columns: {_value: "mean_age"})
-                    
-                    j = baseTable
-                      |> filter(fn: (r) => r["_field"] == "length")
-                      |> count()
-                      |> group()
-                      |> keep(columns: ["_value", "doi"])
-                      |> rename(columns: {_value: "count"})
-                    
-                    jk = baseTable
-                      |> filter(fn: (r) => r["_field"] == "bot_rating")
-                      |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                      |> experimental.mean()
-                      |> group()
-                      |> keep(columns: ["_value", "doi"])
-                      |> rename(columns: {_value: "mean_bot_rating"})
-                    
-                    join1 = join(
-                      tables: {a:a, b:b},
-                      on: ["doi"]
-                    )
-                    
-                    join2 = join(
-                      tables: {join1:join1, c:c},
-                      on: ["doi"]
-                    )
-                    
-                    join3 = join(
-                      tables: {join2:join2, ad:ad},
-                      on: ["doi"]
-                    )
-                    
-                    join4 = join(
-                      tables: {join3:join3, e:e},
-                      on: ["doi"]
-                    )
-                    
-                    join46 = join(
-                      tables: {join4:join4, j:j},
-                      on: ["doi"]
-                    )
-                    
-                    join5 = join(
-                      tables: {join46:join46, f:f},
-                      on: ["doi"]
-                    )
-                    
-                    join6 = join(
-                      tables: {join5:join5, g:g},
-                      on: ["doi"]
-                    )
-                    
-                    join68 = join(
-                      tables: {join6:join6, jk:jk},
-                      on: ["doi"]
-                    )
-                    
-                    join9 = join(
-                        tables: {join68:join68, j7:j7},
-                        on: ["doi"]
-                    )
-                      |> sort(columns: ["score"], desc: true)
-                      |> yield(name: "join10")
-    
-            '''
+
+        # print('done pubs')
+        session_factory = sessionmaker(bind=DAO.engine)
+        Session = scoped_session(session_factory)
+        session = Session()
+
+        frames = get_dataframes(trending)
+        trend = calculate_trend(frames)
+
         a = time.time()
+        # split dois in smaller lists to reduce time per connection and read timeouts
+        query_dois = split_list(dois, 200)
 
-        try:
-            tables = query_api.query(query, params=p)
-            # print(query)
-        except urllib3.exceptions.ReadTimeoutError:
-            print('ReadTimeoutError')
-        else:
-            # print('done pubs')
-            session_factory = sessionmaker(bind=DAO.engine)
-            Session = scoped_session(session_factory)
-            session = Session()
-
-            frames = get_dataframes(trending)
-            trend = calculate_trend(frames)
-
+        records = []
+        for part_dois in query_dois:
+            tables = run_influx_trend_calculation(part_dois, p)
             print(time.time() - a)
-            # print('done trends ' + trending['name'])
 
-            delete_trending_table(session, trending['name'])
-
-            trending_objects = []
             for table in tables:
                 for record in table.records:
-                    trending_value = 0
-                    if record['doi'] in trend:
-                        trending_value = trend[record['doi']]
+                    records.append(record)
+        print('total: ' + str(time.time() - a) + ' with ' + str(len(records)) + ' dois total')
 
-                    save_trend_to_influx(record, trending_value, trending['trending_bucket'])
+        trending_objects = []
+        delete_trending_table(session, trending['name'])
+        for record in records:
+            trending_value = 0
+            if record['doi'] in trend:
+                trending_value = trend[record['doi']]
 
-                    t_obj = Trending(publication_doi=record['doi'],
-                                     duration=trending['name'],
-                                     score=record['score'], count=record['count'],
-                                     mean_sentiment=record['mean_sentiment'],
-                                     sum_followers=record['sum_followers'],
-                                     mean_age=record['mean_age'],
-                                     mean_length=record['length'],
-                                     mean_questions=record['questions'],
-                                     mean_exclamations=record['exclamations'],
-                                     abstract_difference=record['contains_abstract_raw'],
-                                     mean_bot_rating=record['mean_bot_rating'],
-                                     ema=record['ema'],
-                                     kama=record['kama'],
-                                     ker=record['ker'],
-                                     mean_score=record['mean'],
-                                     stddev=record['stddev'],
-                                     trending=trending_value,
-                                     projected_change=record['prediction'])
+            save_trend_to_influx(record, trending_value, trending['trending_bucket'])
 
-                    t_obj = save_or_update(session, t_obj, Trending,
-                                           {'publication_doi': t_obj.publication_doi, 'duration': t_obj.duration})
-                    trending_objects.append(t_obj)
-            return trending_objects
+            t_obj = Trending(publication_doi=record['doi'],
+                             duration=trending['name'],
+                             score=record['score'], count=record['count'],
+                             mean_sentiment=record['mean_sentiment'],
+                             sum_followers=record['sum_followers'],
+                             mean_age=record['mean_age'],
+                             mean_length=record['length'],
+                             mean_questions=record['questions'],
+                             mean_exclamations=record['exclamations'],
+                             abstract_difference=record['contains_abstract_raw'],
+                             mean_bot_rating=record['mean_bot_rating'],
+                             ema=record['ema'],
+                             kama=record['kama'],
+                             ker=record['ker'],
+                             mean_score=record['mean'],
+                             stddev=record['stddev'],
+                             trending=trending_value,
+                             projected_change=record['prediction'])
+
+            t_obj = save_or_update(session, t_obj, Trending,
+                                   {'publication_doi': t_obj.publication_doi, 'duration': t_obj.duration})
+            trending_objects.append(t_obj)
+
+        return trending_objects
     return []
+
+
+def run_influx_trend_calculation(dois, p):
+    filter_obj = doi_filter_list(dois, p)
+    query = '''
+                import "math"
+                import "experimental"
+
+                _stop = now()                
+                baseTable = from(bucket: _bucket)
+                    |> range(start: _start, stop: _stop)
+                    |> filter(fn: (r) => r["_measurement"] == "trending") 
+            '''
+    query += filter_obj['string']
+    query += '''                
+
+                windowTable = baseTable
+                    |> filter(fn: (r) => r["_field"] == "score")
+                    |> aggregateWindow(every: _window, fn: sum, createEmpty: true)
+                    |> sort(columns: ["_time"], desc: true)
+                    |> limit(n: _window_count)
+                    |> sort(columns: ["_time"])
+                    |> map(fn:(r) => ({
+                        r with _value:
+                        if exists r._value then r._value
+                        else 0.0
+                    }))
+                    |> keep(columns: ["_time", "_value", "doi"])
+
+                stddev = windowTable
+                    |> stddev()
+                    |> group()
+                    |> keep(columns: ["_value", "doi"])
+                    |> rename(columns: {_value: "stddev"})
+
+                ema = windowTable
+                    |> exponentialMovingAverage(n: _window_count)
+                    |> group()
+                    |> keep(columns: ["_value", "doi"])
+                    |> rename(columns: {_value: "ema"})
+
+                j1 = join(
+                    tables: {stddev:stddev, ema:ema},
+                    on: ["doi"]
+                    )
+
+                ker = windowTable
+                    |> kaufmansER(n: _window_count - 1)
+                    |> group()
+                    |> keep(columns: ["_value", "doi"])
+                    |> rename(columns: {_value: "ker"})
+
+                j2 = join(
+                    tables: {j1:j1, ker:ker},
+                    on: ["doi"]
+                    )
+
+                kama = windowTable
+                    |> kaufmansAMA(n: _window_count -1)
+                    |> group()
+                    |> keep(columns: ["_value", "doi"])
+                    |> rename(columns: {_value: "kama"})
+
+                j3 = join(
+                    tables: {kama:kama, j2:j2},
+                    on: ["doi"]
+                    )
+
+                mean = baseTable
+                    |> filter(fn: (r) => r["_field"] == "score")
+                    |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                    |> experimental.mean()
+                    |> group()
+                    |> keep(columns: ["_value", "doi"])
+                    |> rename(columns: {_value: "mean"})
+
+                j5 = join(
+                    tables: {mean:mean, j3:j3},
+                    on: ["doi"]
+                    )
+
+                prediction = windowTable
+                    |> holtWinters(n: 1,  seasonality: 0, interval: _window, withFit: false, timeColumn: "_time", column: "_value")
+                    |> group()
+                    |> keep(columns: ["_value", "doi"])
+                    |> rename(columns: {_value: "prediction"})
+
+                j6 = join(
+                    tables: {prediction:prediction, j5:j5},
+                    on: ["doi"]
+                    )
+
+                score = baseTable
+                  |> filter(fn: (r) => r["_field"] == "score")
+                  |> keep(columns: ["_value", "_time", "doi"])
+                  |> map(fn:(r) => ({ r with _value: float(v: r._value) * math.exp(x: _exponent * float(v: uint(v: now()) - uint(v: r._time)) / (10.0 ^ 9.0)) }))
+                  |> cumulativeSum(columns: ["_value"])
+                  |> last(column: "_value")
+                  |> keep(columns: ["_value", "doi"])
+                  |> group()
+                  |> rename(columns: {_value: "score"})
+
+                j7 = join(
+                  tables: {j6:j6, score:score},
+                  on: ["doi"]
+                )
+
+                a = baseTable
+                  |> filter(fn: (r) => r["_field"] == "followers")
+                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                  |> sum()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "sum_followers"})
+
+                b = baseTable
+                  |> filter(fn: (r) => r["_field"] == "sentiment_raw")
+                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                  |> experimental.mean()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "mean_sentiment"})
+
+                c = baseTable
+                  |> filter(fn: (r) => r["_field"] == "contains_abstract_raw")
+                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                  |> experimental.mean()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "contains_abstract_raw"})
+
+                ad = baseTable
+                  |> filter(fn: (r) => r["_field"] == "questions")
+                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                  |> experimental.mean()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "questions"})
+
+                e = baseTable
+                  |> filter(fn: (r) => r["_field"] == "exclamations")
+                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                  |> experimental.mean()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "exclamations"})
+
+                f = baseTable
+                  |> filter(fn: (r) => r["_field"] == "length")
+                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                  |> experimental.mean()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "length"})
+
+                g = baseTable
+                  |> filter(fn: (r) => r["_field"] == "length")
+                  |> map(fn: (r) => ({r with _value: math.round(x: float(v: uint(v: now()) - uint(v: r._time)) / (10.0 ^ 9.0)) }))
+                  |> experimental.mean()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "mean_age"})
+
+                j = baseTable
+                  |> filter(fn: (r) => r["_field"] == "length")
+                  |> count()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "count"})
+
+                jk = baseTable
+                  |> filter(fn: (r) => r["_field"] == "bot_rating")
+                  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
+                  |> experimental.mean()
+                  |> group()
+                  |> keep(columns: ["_value", "doi"])
+                  |> rename(columns: {_value: "mean_bot_rating"})
+
+                join1 = join(
+                  tables: {a:a, b:b},
+                  on: ["doi"]
+                )
+
+                join2 = join(
+                  tables: {join1:join1, c:c},
+                  on: ["doi"]
+                )
+
+                join3 = join(
+                  tables: {join2:join2, ad:ad},
+                  on: ["doi"]
+                )
+
+                join4 = join(
+                  tables: {join3:join3, e:e},
+                  on: ["doi"]
+                )
+
+                join46 = join(
+                  tables: {join4:join4, j:j},
+                  on: ["doi"]
+                )
+
+                join5 = join(
+                  tables: {join46:join46, f:f},
+                  on: ["doi"]
+                )
+
+                join6 = join(
+                  tables: {join5:join5, g:g},
+                  on: ["doi"]
+                )
+
+                join68 = join(
+                  tables: {join6:join6, jk:jk},
+                  on: ["doi"]
+                )
+
+                join9 = join(
+                    tables: {join68:join68, j7:j7},
+                    on: ["doi"]
+                )
+                  |> sort(columns: ["score"], desc: true)
+                  |> yield(name: "join10")
+
+        '''
+    try:
+        return query_api.query(query, params=p)
+    except urllib3.exceptions.ReadTimeoutError:
+        print('ReadTimeoutError')
 
 
 def delete_trending_table(session, duration):
