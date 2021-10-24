@@ -484,13 +484,13 @@ async def trend_calc_year():
 
 
 # time is utc
-@app.crontab('0 6 * * *')
+@app.crontab('30 6 * * *')
 async def hot_papers_cron():
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, hot_papers)
 
 
-async def hot_papers():
+def hot_papers():
     """
     get only papers that have covid as a top3 entity
     """
@@ -562,6 +562,7 @@ async def hot_papers():
         print(api.verify_credentials().name)
         api.update_status(status=pretext)
 
+    return True
 
 def smart_truncate(content, length=100, suffix=' (...)'):
     if len(content) <= length:
