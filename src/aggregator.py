@@ -484,7 +484,7 @@ async def trend_calc_year():
 
 
 # time is utc
-@app.crontab('0 7 * * *')
+@app.crontab('0 6 * * *')
 async def hot_papers_cron():
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, hot_papers)
