@@ -557,9 +557,6 @@ It will use the count of datapoints not the actual tweet count.</p>
 <h2 id="aggregator.hot_papers" class="doc doc-heading">
 <code class="highlight language-python"><span class="n">hot_papers</span><span class="p">()</span></code>
 
-  <span class="doc doc-properties">
-      <small class="doc doc-property doc-property-async"><code>async</code></small>
-  </span>
 
 </h2>
 
@@ -569,7 +566,7 @@ It will use the count of datapoints not the actual tweet count.</p>
 
         <details class="quote">
           <summary>Source code in <code>src/aggregator.py</code></summary>
-          <div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span> <span class="nf">hot_papers</span><span class="p">():</span>
+          <div class="highlight"><pre><span></span><code><span class="k">def</span> <span class="nf">hot_papers</span><span class="p">():</span>
     <span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    get only papers that have covid as a top3 entity</span>
 <span class="sd">    &quot;&quot;&quot;</span>
@@ -640,6 +637,8 @@ It will use the count of datapoints not the actual tweet count.</p>
         <span class="n">api</span> <span class="o">=</span> <span class="n">tweepy</span><span class="o">.</span><span class="n">API</span><span class="p">(</span><span class="n">auth</span><span class="p">)</span>
         <span class="nb">print</span><span class="p">(</span><span class="n">api</span><span class="o">.</span><span class="n">verify_credentials</span><span class="p">()</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
         <span class="n">api</span><span class="o">.</span><span class="n">update_status</span><span class="p">(</span><span class="n">status</span><span class="o">=</span><span class="n">pretext</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="kc">True</span>
 </code></pre></div>
         </details>
     </div>
