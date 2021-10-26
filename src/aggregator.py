@@ -535,6 +535,7 @@ def hot_papers():
 
     return True
 
+
 def smart_truncate(content, length=100, suffix=' (...)'):
     if len(content) <= length:
         return content
@@ -986,7 +987,7 @@ async def write_event(data):
     await loop.run_in_executor(None, save_data_to_influx, data)
 
 
-def save_data_to_influx(data, retries = 0):
+def save_data_to_influx(data, retries=0):
     doi = data['obj']['data']['doi']
     createdAt = data['timestamp']
     score = data['subj']['processed']['score']
@@ -1025,12 +1026,10 @@ def save_data_to_influx(data, retries = 0):
             print('LOST DATA')
     except urllib3.exceptions.NewConnectionError:
         print('NewConnectionError')
-        write_api = client.write_api(write_options=SYNCHRONOUS)
         if retries < 10:
             save_data_to_influx(data, (retries + 1))
         else:
             print('LOST DATA')
-
 
 
 def doi_filter_list(doi_list, params):
