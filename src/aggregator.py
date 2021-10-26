@@ -484,7 +484,7 @@ async def trend_calc_year():
 
 
 # time is utc
-@app.crontab('0 7 * * *')
+@app.crontab('0 6 * * *')
 async def hot_papers_cron():
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, hot_papers)
@@ -495,36 +495,7 @@ def hot_papers():
     get only papers that have covid as a top3 entity
     """
     query = """
-            SELECT t.*
-            FROM (
-                     SELECT ROW_NUMBER() OVER (ORDER BY t.score DESC) as trending_ranking, *
-                     FROM (SELECT distinct on (p.id) score, p.*, a.name
-                           FROM trending t
-                                    JOIN publication p on p.doi = t.publication_doi
-                                    JOIN publication_author pa on p.doi = pa.publication_doi
-                                    JOIN author a on pa.author_id = a.id
-                           WHERE duration = 'today'
-                          ) t
-                     ORDER BY trending_ranking
-                 ) t
-                     INNER JOIN (
-                        SELECT publication_doi
-                        FROM (
-                                 SELECT value,
-                                        count,
-                                        publication_doi,
-                                        rank() over (partition by publication_doi order by publication_doi, count desc) rn
-                                 FROM (
-                                          SELECT publication_doi, SUM(ddp.count) as count, dd.value
-                                          FROM discussion_data_point as ddp
-                                                   JOIN discussion_data as dd ON (ddp.discussion_data_point_id = dd.id)
-                                          WHERE type = 'entity'
-                                          GROUP BY (dd.value, publication_doi)
-                                          ORDER BY count DESC) AS temp1) as temp2
-                        WHERE value LIKE '%COVID-19%' AND rn <= 3
-                ) ddp ON t.doi = ddp.publication_doi
-            ORDER BY trending_ranking
-            LIMIT 3;
+            SELECT * from trending_covid_papers WHERE duration = 'today' ORDER BY trending_ranking LIMIT 3;
     """
     s = text(query)
     session_factory = sessionmaker(bind=DAO.engine)
@@ -563,6 +534,7 @@ def hot_papers():
         api.update_status(status=pretext)
 
     return True
+
 
 def smart_truncate(content, length=100, suffix=' (...)'):
     if len(content) <= length:
@@ -1015,7 +987,7 @@ async def write_event(data):
     await loop.run_in_executor(None, save_data_to_influx, data)
 
 
-def save_data_to_influx(data, retries = 0):
+def save_data_to_influx(data, retries=0):
     doi = data['obj']['data']['doi']
     createdAt = data['timestamp']
     score = data['subj']['processed']['score']
@@ -1054,12 +1026,10 @@ def save_data_to_influx(data, retries = 0):
             print('LOST DATA')
     except urllib3.exceptions.NewConnectionError:
         print('NewConnectionError')
-        write_api = client.write_api(write_options=SYNCHRONOUS)
         if retries < 10:
             save_data_to_influx(data, (retries + 1))
         else:
             print('LOST DATA')
-
 
 
 def doi_filter_list(doi_list, params):
