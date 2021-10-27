@@ -455,7 +455,7 @@ async def trend_calc_currently():
     await run_trend_calculation(trending_time_definition['currently'])
 
 
-@app.crontab('*/10 * * * *')
+@app.crontab('1-59/10 * * * *')
 async def trend_calc_today():
     """run trend calculation in the defined interval"""
     print('calc trend today')
@@ -484,7 +484,7 @@ async def trend_calc_year():
 
 
 # time is utc
-@app.crontab('0 6 * * *')
+@app.crontab('5 22 * * *')
 async def hot_papers_cron():
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, hot_papers)
@@ -494,9 +494,7 @@ def hot_papers():
     """
     get only papers that have covid as a top3 entity
     """
-    query = """
-            SELECT * from trending_covid_papers WHERE duration = 'today' ORDER BY trending_ranking LIMIT 3;
-    """
+    query = "SELECT * FROM trending_covid_papers WHERE duration = 'today' ORDER BY trending_ranking LIMIT 3;"
     s = text(query)
     session_factory = sessionmaker(bind=DAO.engine)
     Session = scoped_session(session_factory)
@@ -610,17 +608,18 @@ def get_dataframes(trending):
 
     result = query_api.query(org=org, query=query, params=filter_obj['params'])
     results = []
-    for table in result:
-        scores = []
-        times = []
-        doi = None
-        for record in table.records:
-            if not doi:
-                doi = record['doi']
-            scores.append(record['_value'])
-            times.append(record['_time'])
-        df = pd.DataFrame(data={'score': scores}, index=times)
-        results.append({"doi": doi, "df": df})
+    if result:
+        for table in result:
+            scores = []
+            times = []
+            doi = None
+            for record in table.records:
+                if not doi:
+                    doi = record['doi']
+                scores.append(record['_value'])
+                times.append(record['_time'])
+            df = pd.DataFrame(data={'score': scores}, index=times)
+            results.append({"doi": doi, "df": df})
 
     return results
 
