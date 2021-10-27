@@ -570,7 +570,12 @@ It will use the count of datapoints not the actual tweet count.</p>
     <span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    get only papers that have covid as a top3 entity</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="n">query</span> <span class="o">=</span> <span class="s2">&quot;SELECT * FROM trending_covid_papers WHERE duration = &#39;today&#39; ORDER BY trending_ranking LIMIT 3;&quot;</span>
+    <span class="n">query</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">        SELECT distinct on (trending_ranking) * FROM trending_covid_papers tcp</span>
+<span class="s2">            JOIN publication_author pa on tcp.publication_doi = pa.publication_doi</span>
+<span class="s2">            JOIN author a on pa.author_id = a.id</span>
+<span class="s2">        WHERE duration = &#39;today&#39; ORDER BY trending_ranking LIMIT 3;</span>
+<span class="s2">    &quot;&quot;&quot;</span>
     <span class="n">s</span> <span class="o">=</span> <span class="n">text</span><span class="p">(</span><span class="n">query</span><span class="p">)</span>
     <span class="n">session_factory</span> <span class="o">=</span> <span class="n">sessionmaker</span><span class="p">(</span><span class="n">bind</span><span class="o">=</span><span class="n">DAO</span><span class="o">.</span><span class="n">engine</span><span class="p">)</span>
     <span class="n">Session</span> <span class="o">=</span> <span class="n">scoped_session</span><span class="p">(</span><span class="n">session_factory</span><span class="p">)</span>
