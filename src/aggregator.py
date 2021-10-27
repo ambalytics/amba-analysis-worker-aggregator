@@ -484,7 +484,7 @@ async def trend_calc_year():
 
 
 # time is utc
-@app.crontab('13 20 * * *')
+@app.crontab('27 20 * * *')
 async def hot_papers_cron():
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, hot_papers)
@@ -494,7 +494,12 @@ def hot_papers():
     """
     get only papers that have covid as a top3 entity
     """
-    query = "SELECT * FROM trending_covid_papers WHERE duration = 'today' ORDER BY trending_ranking LIMIT 3;"
+    query = """
+        SELECT distinct on (trending_ranking) * FROM trending_covid_papers tcp
+            JOIN publication_author pa on tcp.publication_doi = pa.publication_doi
+            JOIN author a on pa.author_id = a.id
+        WHERE duration = 'today' ORDER BY trending_ranking LIMIT 3;
+    """
     s = text(query)
     session_factory = sessionmaker(bind=DAO.engine)
     Session = scoped_session(session_factory)
