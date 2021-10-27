@@ -484,7 +484,7 @@ async def trend_calc_year():
 
 
 # time is utc
-@app.crontab('8 21 * * *')
+@app.crontab('2 6 * * *')
 async def hot_papers_cron():
     print('twitter bot')
     loop = asyncio.get_event_loop()
@@ -515,7 +515,7 @@ def hot_papers():
         for r in result:
             pretext += "\n" + str(r['trending_ranking']) + '. ' + r['name'].split(' ')[-1] + ' et al. ' \
                        + smart_truncate(r['title'], length)
-        pretext += '\nhttps://bit.ly/3m4YoWR'
+        pretext += '\nhttps://bit.ly/3pLswZM'
 
         if len(pretext) > 280:
             length -= 10
