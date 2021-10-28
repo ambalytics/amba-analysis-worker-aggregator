@@ -573,13 +573,18 @@ def get_doi_list_trending(trending):
             |> yield()  
     """
 
-    result = query_api.query(org=org, query=query, params=p)
-    results = []
-    for table in result:
-        for record in table.records:
-            results.append(record['doi'])
-    # print(results)
-    return results
+    try:
+        result = query_api.query(org=org, query=query, params=p)
+    except urllib3.exceptions.ReadTimeoutError:
+        print('ReadTimeoutError')
+        return []
+    else:
+        results = []
+        for table in result:
+            for record in table.records:
+                results.append(record['doi'])
+        # print(results)
+        return results
 
 
 def calculate_trend(data):
@@ -612,22 +617,27 @@ def get_dataframes(trending):
         |> yield()
         """
 
-    result = query_api.query(org=org, query=query, params=filter_obj['params'])
-    results = []
-    if result:
-        for table in result:
-            scores = []
-            times = []
-            doi = None
-            for record in table.records:
-                if not doi:
-                    doi = record['doi']
-                scores.append(record['_value'])
-                times.append(record['_time'])
-            df = pd.DataFrame(data={'score': scores}, index=times)
-            results.append({"doi": doi, "df": df})
+    try:
+        result = query_api.query(org=org, query=query, params=filter_obj['params'])
+    except urllib3.exceptions.ReadTimeoutError:
+        print('ReadTimeoutError')
+        return []
+    else:
+        results = []
+        if result:
+            for table in result:
+                scores = []
+                times = []
+                doi = None
+                for record in table.records:
+                    if not doi:
+                        doi = record['doi']
+                    scores.append(record['_value'])
+                    times.append(record['_time'])
+                df = pd.DataFrame(data={'score': scores}, index=times)
+                results.append({"doi": doi, "df": df})
 
-    return results
+        return results
 
 
 def split_list(total_list, n):
