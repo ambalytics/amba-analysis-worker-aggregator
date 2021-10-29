@@ -670,45 +670,45 @@ def get_base_trend_table(trending):
         for part_dois in query_dois:
             tables = run_influx_trend_calculation(part_dois, p)
             print(time.time() - a)
-
-            for table in tables:
-                for record in table.records:
-                    records.append(record)
+            if tables:
+                for table in tables:
+                    for record in table.records:
+                        records.append(record)
         print('total: ' + str(time.time() - a) + ' with ' + str(len(records)) + ' dois total')
+        if len(records) > 0:
+            trending_objects = []
+            delete_trending_table(session, trending['name'])
+            for record in records:
+                trending_value = 0
+                if record['doi'] in trend:
+                    trending_value = trend[record['doi']]
 
-        trending_objects = []
-        delete_trending_table(session, trending['name'])
-        for record in records:
-            trending_value = 0
-            if record['doi'] in trend:
-                trending_value = trend[record['doi']]
+                save_trend_to_influx(record, trending_value, trending['trending_bucket'])
 
-            save_trend_to_influx(record, trending_value, trending['trending_bucket'])
+                t_obj = Trending(publication_doi=record['doi'],
+                                 duration=trending['name'],
+                                 score=record['score'], count=record['count'],
+                                 mean_sentiment=record['mean_sentiment'],
+                                 sum_followers=record['sum_followers'],
+                                 mean_age=record['mean_age'],
+                                 mean_length=record['length'],
+                                 mean_questions=record['questions'],
+                                 mean_exclamations=record['exclamations'],
+                                 abstract_difference=record['contains_abstract_raw'],
+                                 mean_bot_rating=record['mean_bot_rating'],
+                                 ema=record['ema'],
+                                 kama=record['kama'],
+                                 ker=record['ker'],
+                                 mean_score=record['mean'],
+                                 stddev=record['stddev'],
+                                 trending=trending_value,
+                                 projected_change=record['prediction'])
 
-            t_obj = Trending(publication_doi=record['doi'],
-                             duration=trending['name'],
-                             score=record['score'], count=record['count'],
-                             mean_sentiment=record['mean_sentiment'],
-                             sum_followers=record['sum_followers'],
-                             mean_age=record['mean_age'],
-                             mean_length=record['length'],
-                             mean_questions=record['questions'],
-                             mean_exclamations=record['exclamations'],
-                             abstract_difference=record['contains_abstract_raw'],
-                             mean_bot_rating=record['mean_bot_rating'],
-                             ema=record['ema'],
-                             kama=record['kama'],
-                             ker=record['ker'],
-                             mean_score=record['mean'],
-                             stddev=record['stddev'],
-                             trending=trending_value,
-                             projected_change=record['prediction'])
+                t_obj = save_or_update(session, t_obj, Trending,
+                                       {'publication_doi': t_obj.publication_doi, 'duration': t_obj.duration})
+                trending_objects.append(t_obj)
 
-            t_obj = save_or_update(session, t_obj, Trending,
-                                   {'publication_doi': t_obj.publication_doi, 'duration': t_obj.duration})
-            trending_objects.append(t_obj)
-
-        return trending_objects
+            return trending_objects
     return []
 
 
@@ -940,6 +940,7 @@ def run_influx_trend_calculation(dois, p):
         return query_api.query(query, params=p)
     except urllib3.exceptions.ReadTimeoutError:
         print('ReadTimeoutError')
+    return []
 
 
 def delete_trending_table(session, duration):
