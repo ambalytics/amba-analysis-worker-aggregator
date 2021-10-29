@@ -143,6 +143,8 @@ trending_time_definition = {
     # }
 }
 
+queue = asyncio.Queue()
+
 
 @app.task
 async def init_influx():
@@ -385,17 +387,17 @@ async def init_influx():
                 task = Task(id=1, name=name, org_id=org_obj.id, status="active", flux=flux)
                 task = tasks_api.create_task(task)
 
-
-# not in influx because
-# need dois (-)
-# need trend calc (+)
-# subject to change
-async def run_trend_calculation(trending_time):
     loop = asyncio.get_event_loop()
-    # Using None will create a ThreadPoolExecutor
-    # you can also pass in an executor (Thread or Process)
-    await loop.run_in_executor(None, get_base_trend_table, trending_time)
-    await loop.run_in_executor(None, update_covid_trends)
+    loop.create_task(run_trend_calculation())
+
+
+async def run_trend_calculation():
+    while True:
+        trending_time = await queue.get()
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, get_base_trend_table, trending_time)
+        await loop.run_in_executor(None, update_covid_trends)
+        queue.task_done()
 
 
 def update_covid_trends():
@@ -452,39 +454,39 @@ def update_covid_trends():
 async def trend_calc_currently():
     """run trend calculation in the defined interval"""
     print('calc trend currently')
-    await run_trend_calculation(trending_time_definition['currently'])
+    await queue.put(trending_time_definition['currently'])
 
 
 @app.crontab('1-59/10 * * * *')
 async def trend_calc_today():
     """run trend calculation in the defined interval"""
     print('calc trend today')
-    await run_trend_calculation(trending_time_definition['today'])
+    await queue.put(trending_time_definition['today'])
 
 
 @app.crontab('25 * * * *')
 async def trend_calc_week():
     """run trend calculation in the defined interval"""
     print('calc trend week')
-    await run_trend_calculation(trending_time_definition['week'])
+    await queue.put(trending_time_definition['week'])
 
 
 @app.crontab('5 */3 * * *')
 async def trend_calc_month():
     """run trend calculation in the defined interval"""
     print('calc trend month')
-    await run_trend_calculation(trending_time_definition['month'])
+    await queue.put(trending_time_definition['month'])
 
 
 @app.crontab('4 2 * * *')
 async def trend_calc_year():
     """run trend calculation in the defined interval"""
     print('calc trend year')
-    await run_trend_calculation(trending_time_definition['year'])
+    await queue.put(trending_time_definition['year'])
 
 
 # time is utc
-@app.crontab('2 6 * * *')
+@app.crontab('59 5 * * *')
 async def hot_papers_cron():
     print('twitter bot')
     loop = asyncio.get_event_loop()
@@ -515,7 +517,7 @@ def hot_papers():
         for r in result:
             pretext += "\n" + str(r['trending_ranking']) + '. ' + r['name'].split(' ')[-1] + ' et al. ' \
                        + smart_truncate(r['title'], length)
-        pretext += '\nhttps://bit.ly/3pLswZM'
+        pretext += '\nhttps://bit.ly/3vUSZFg'
 
         if len(pretext) > 280:
             length -= 10
