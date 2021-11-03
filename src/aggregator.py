@@ -879,6 +879,7 @@ def run_influx_trend_calculation(dois, p):
                   |> filter(fn: (r) => r["_field"] == "count")
                   |> sum()
                   |> group()
+                  |> toInt()
                   |> keep(columns: ["_value", "doi"])
                   |> rename(columns: {_value: "count"})
 
