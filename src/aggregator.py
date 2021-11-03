@@ -876,7 +876,7 @@ def run_influx_trend_calculation(dois, p):
                   |> rename(columns: {_value: "mean_age"})
 
                 j = baseTable
-                  |> filter(fn: (r) => r["_field"] == "length")
+                  |> filter(fn: (r) => r["_field"] == "count")
                   |> sum()
                   |> group()
                   |> keep(columns: ["_value", "doi"])
