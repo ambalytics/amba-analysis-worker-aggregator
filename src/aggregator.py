@@ -596,7 +596,7 @@ def calculate_trend(data):
         df = d['df']
         # print(doi)
         # print(len(df.index))
-        trend = mk.yue_wang_modification_test(df)
+        trend = mk.yue_wang_modification_test(df) # sens_slope
         # print(trend.slope)
         result[doi] = trend.slope
     return result
@@ -877,7 +877,7 @@ def run_influx_trend_calculation(dois, p):
 
                 j = baseTable
                   |> filter(fn: (r) => r["_field"] == "length")
-                  |> count()
+                  |> sum()
                   |> group()
                   |> keep(columns: ["_value", "doi"])
                   |> rename(columns: {_value: "count"})
@@ -1036,8 +1036,8 @@ def save_data_to_influx(data, retries=0):
 
     try:
         write_api.write('currently', org, [point])
-    except influxdb_client.rest.ApiException:
-        print('ApiException')
+    except influxdb_client.rest.ApiException as e:
+        print(e)
         if retries < 10:
             save_data_to_influx(data, (retries + 1))
         else:
