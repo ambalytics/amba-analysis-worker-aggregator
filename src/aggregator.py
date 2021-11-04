@@ -783,7 +783,7 @@ def run_influx_trend_calculation(dois, p):
                 mean = baseTable
                     |> filter(fn: (r) => r["_field"] == "score" or r["_field"] == "count")
                     |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-                    |> map(fn: (r) => ({ r with _value: float(v:r.score / r.count) }))
+                    |> map(fn: (r) => ({ r with _value: float(v:r.score / float(v: r.count)) }))
                     |> experimental.mean()
                     |> group()
                     |> keep(columns: ["_value", "doi"])
