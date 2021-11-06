@@ -246,9 +246,9 @@ async def init_influx():
                             |> keep(columns: ["_value", "_time", "_field", "doi", "_measurement"])
                         
                         j = baseTable
-                            |> filter(fn: (r) => r["_field"] == "length")
+                            |> filter(fn: (r) => r["_field"] == "count")
                             |> map(fn: (r) => ({r with _value: float(v: r._value)}))
-                            |> aggregateWindow(fn: count, every: _window, createEmpty: false)
+                            |> aggregateWindow(fn: sum, every: _window, createEmpty: false)
                             |> group()
                             |> map(fn: (r) => ({r with _value: float(v: r._value)}))
                             |> set(key: "_field", value: "count")
@@ -453,6 +453,7 @@ def update_covid_trends():
 @app.crontab('*/3 * * * *')
 async def trend_calc_currently():
     """run trend calculation in the defined interval"""
+    await asyncio.sleep(15)
     print('calc trend currently')
     await queue.put(trending_time_definition['currently'])
 
@@ -460,6 +461,7 @@ async def trend_calc_currently():
 @app.crontab('1-59/10 * * * *')
 async def trend_calc_today():
     """run trend calculation in the defined interval"""
+    await asyncio.sleep(15)
     print('calc trend today')
     await queue.put(trending_time_definition['today'])
 
@@ -467,6 +469,7 @@ async def trend_calc_today():
 @app.crontab('25 * * * *')
 async def trend_calc_week():
     """run trend calculation in the defined interval"""
+    await asyncio.sleep(15)
     print('calc trend week')
     await queue.put(trending_time_definition['week'])
 
@@ -474,6 +477,7 @@ async def trend_calc_week():
 @app.crontab('5 */3 * * *')
 async def trend_calc_month():
     """run trend calculation in the defined interval"""
+    await asyncio.sleep(15)
     print('calc trend month')
     await queue.put(trending_time_definition['month'])
 
@@ -481,6 +485,7 @@ async def trend_calc_month():
 @app.crontab('4 2 * * *')
 async def trend_calc_year():
     """run trend calculation in the defined interval"""
+    await asyncio.sleep(15)
     print('calc trend year')
     await queue.put(trending_time_definition['year'])
 
@@ -488,6 +493,7 @@ async def trend_calc_year():
 # time is utc
 @app.crontab('59 5 * * *')
 async def hot_papers_cron():
+    await asyncio.sleep(15)
     print('twitter bot')
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, hot_papers)
@@ -1050,6 +1056,7 @@ def save_data_to_influx(data, retries=0):
             save_data_to_influx(data, (retries + 1))
         else:
             print('LOST DATA')
+            os.system("pkill -9 python")
 
 
 def doi_filter_list(doi_list, params):
