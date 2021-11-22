@@ -2,4 +2,5 @@
 
 - setup influx (if needed)
 - send data points to influx db
-- do trend calculations (using influx) save in postgres
+- do trend calculations (using influx db) save in postgres and influx db
+- run twitter bot

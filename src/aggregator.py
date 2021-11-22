@@ -58,7 +58,11 @@ trending_time_definition = {
         'trending_interval': timedelta(minutes=3),
         'downsample_bucket': 'today',
         'downsample_window': timedelta(minutes=2),
-        'numbers_window': timedelta(minutes=1)
+        'downsample_cron': '*/4 * * * *',
+        'downsample_offset': '6s',
+        'numbers_window': timedelta(minutes=1),
+        'numbers_cron': '* * * * *',
+        'numbers_offset': '4s'
     },
     'today': {
         'name': 'today',
@@ -72,7 +76,11 @@ trending_time_definition = {
         'trending_interval': timedelta(minutes=10),
         'downsample_bucket': 'week',
         'downsample_window': timedelta(minutes=20),
-        'numbers_window': timedelta(minutes=2)
+        'downsample_cron': '19 * * * *',
+        'downsample_offset': '15s',
+        'numbers_window': timedelta(minutes=2),
+        'numbers_cron': '*/4 * * * *',
+        'numbers_offset': '10s'
     },
     'week': {
         'name': 'week',
@@ -86,7 +94,11 @@ trending_time_definition = {
         'trending_interval': timedelta(hours=1),
         'downsample_bucket': 'month',
         'downsample_window': timedelta(hours=2),
-        'numbers_window': timedelta(minutes=20)
+        'downsample_cron': '34 */3 * * *',
+        'downsample_offset': '15s',
+        'numbers_window': timedelta(minutes=20),
+        'numbers_cron': '26 * * * *',
+        'numbers_offset': '15s'
     },
     'month': {
         'name': 'month',
@@ -100,7 +112,11 @@ trending_time_definition = {
         'trending_interval': timedelta(hours=3),
         'downsample_bucket': 'year',
         'downsample_window': timedelta(hours=24),
-        'numbers_window': timedelta(hours=2)
+        'downsample_cron': '4 6 * * *',
+        'downsample_offset': '15s',
+        'numbers_window': timedelta(hours=2),
+        'numbers_cron': '29 */3 * * *',
+        'numbers_offset': '15s'
     },
     'year': {
         'name': 'year',
@@ -114,7 +130,11 @@ trending_time_definition = {
         'trending_interval': timedelta(hours=24),
         'downsample_bucket': 'history',
         'downsample_window': timedelta(days=3),
-        'numbers_window': timedelta(hours=24)
+        'downsample_cron': '4 4 * * *',
+        'downsample_offset': '15s',
+        'numbers_window': timedelta(hours=24),
+        'numbers_cron': '39 */72 * * *',
+        'numbers_offset': '15s'
     },
     'numbers': {
         'name': 'numbers',
@@ -128,19 +148,12 @@ trending_time_definition = {
         'trending_bucket': False,
         'downsample_bucket': False
     },
-    # 'history': {
-    #     'name': 'history',
-    #     'trending_bucket': 'trending_history',
-    #     'duration': None,  # todo use date?
-    #     'retention': None,
-    #     'trending_interval': timedelta(hours=12),
-    #     'time_exponent': -0.000000833333333,
-    #     'window_size': timedelta(minutes=720),  # todo?
-    #     'min_count': 15,
-    #     'window_count': 60,
-    #     'downsample_bucket': None,
-    #     'downsample_window': None
-    # }
+    'history': {
+        'name': 'history',
+        'retention': None,
+        'trending_bucket': False,
+        'downsample_bucket': False
+    }
 }
 
 queue = asyncio.Queue()
@@ -148,6 +161,7 @@ queue = asyncio.Queue()
 
 @app.task
 async def init_influx():
+    """connect to influx and set up buckets and tasks needed"""
     buckets_api = client.buckets_api()
     buckets = buckets_api.find_buckets().buckets
 
@@ -179,16 +193,18 @@ async def init_influx():
             if item['downsample_bucket']:
                 print('create downsample task')
 
-                every = str(int(item['downsample_window'].total_seconds() // 60)) + "m"
                 name = "task_" + item['downsample_bucket']
+                cron = item['downsample_cron']
+                offset = item['downsample_offset']
 
                 flux = '''
                     import "date"
                     import "math"
                     import "experimental"
                     option task = { 
-                      name: "''' + name + '''",
-                      every: ''' + every + '''
+                        name: "''' + name + '''",
+                        cron: "''' + cron + '''",
+                        offset: ''' + offset + ''',
                     }
                     
                 '''
@@ -283,25 +299,24 @@ async def init_influx():
                             |> to(bucket: """
                 flux += '"' + item['downsample_bucket'] + '"'
                 flux += """, org: "ambalytics")"""
-                # print(name)
-                # print(org_obj.id)
-                # print(flux)
                 task = Task(id=0, name=name, org_id=org_obj.id, status="active", flux=flux)
 
                 task = tasks_api.create_task(task)
 
                 print('create numbers task')
 
-                every = str(int(item['numbers_window'].total_seconds() // 60)) + "m"
                 name = "task_numbers_" + item['name']
+                cron = item['numbers_cron']
+                offset = item['numbers_offset']
 
                 flux = '''
                     import "date"
                     import "math"
                     import "experimental"
                     option task = { 
-                      name: "''' + name + '''",
-                      every: ''' + every + '''
+                        name: "''' + name + '''",
+                        cron: "''' + cron + '''",
+                        offset: ''' + offset + ''',
                     }
                     
                 '''
@@ -381,9 +396,6 @@ async def init_influx():
                              
                              union(tables: [aa, ab, ac, ad, ae, af, ag, ah, ai, aj])
                               |> to(bucket: "numbers", org: "ambalytics")"""
-                # print(name)
-                # print(org_obj.id)
-                # print(flux)
                 task = Task(id=1, name=name, org_id=org_obj.id, status="active", flux=flux)
                 task = tasks_api.create_task(task)
 
@@ -392,6 +404,9 @@ async def init_influx():
 
 
 async def run_trend_calculation():
+    """run a trend calculation, this includes calculating the trend table as well as the consecutive update of the
+    covid trends view
+    Trends are run sequential extracted from the trending queue"""
     while True:
         trending_time = await queue.get()
         loop = asyncio.get_event_loop()
@@ -401,6 +416,10 @@ async def run_trend_calculation():
 
 
 def update_covid_trends():
+    """
+    Update the trending_covid_papers materialized view, this includes setting up the view if not already and setting the
+    correct index to allow a concurrently refresh
+    """
     print('calc covid trends')
     q1 = """           
         CREATE MATERIALIZED VIEW IF NOT EXISTS trending_covid_papers AS
@@ -446,7 +465,6 @@ def update_covid_trends():
         result = connection.execute(text(q3))
 
     print(time.time() - a)
-
     return True
 
 
@@ -501,7 +519,9 @@ async def hot_papers_cron():
 
 def hot_papers():
     """
-    get only papers that have covid as a top3 entity
+    Twitter the hottest 3 covid papers.
+    Extracts needed data, generates the twitter string adjusting the title length as needed and than using the bot
+    credentials to tweet.
     """
     query = """
         SELECT distinct on (trending_ranking) * FROM trending_covid_papers tcp
@@ -549,6 +569,9 @@ def hot_papers():
 
 
 def smart_truncate(content, length=100, suffix=' (...)'):
+    """
+    Truncate a string as close as possible to length 100 while only using word breaks (space) and append a suffix
+    """
     if len(content) <= length:
         return content
     else:
@@ -559,15 +582,11 @@ def get_doi_list_trending(trending):
     """
     Return a list of dois that have the required min count for the trending definition given.
     It will use the count of datapoints not the actual tweet count.
-
-    :param trending:
-    :return:
     """
     p = {"_bucket": trending['name'],
          "_min_count": trending['min_count'],
          "_start": trending['duration'],
          }
-    # |> range(start: 2021-09-24T14:00:00Z, stop: 2021-09-24T19:00:00Z)
     query = """
         _stop = now()
         countTable = from(bucket: _bucket)
@@ -591,25 +610,26 @@ def get_doi_list_trending(trending):
         for table in result:
             for record in table.records:
                 results.append(record['doi'])
-        # print(results)
         return results
 
 
 def calculate_trend(data):
+    """
+     calculate the theil sens slope dor a given array of dois with attached data frames
+    """
     result = {}
     for d in data:
         doi = d['doi']
         df = d['df']
-        # print(doi)
-        # print(len(df.index))
-        trend = mk.yue_wang_modification_test(df) # sens_slope
-        # print(trend.slope)
+        trend = mk.sens_slope(df)
         result[doi] = trend.slope
     return result
-    # print(results[0]['df'].head())
 
 
 def get_dataframes(trending):
+    """
+    get data frames for a given trending definition
+    """
     p = {"_bucket": trending['name'],
          "_start": trending['duration'],
          }
@@ -649,10 +669,16 @@ def get_dataframes(trending):
 
 
 def split_list(total_list, n):
+    """
+    split a list in a list of list with an max length of n
+    """
     return [total_list[i:i + n] for i in range(0, len(total_list), n)]
 
 
 def get_base_trend_table(trending):
+    """
+    calculate trends, save them in db and influx
+    """
     p = {"_start": trending['duration'],
          "_bucket": trending['name'],
          "_exponent": trending['time_exponent'],
@@ -721,6 +747,9 @@ def get_base_trend_table(trending):
 
 
 def run_influx_trend_calculation(dois, p):
+    """
+    start running the trend calculations in influx
+    """
     filter_obj = doi_filter_list(dois, p)
     query = '''
                 import "math"
@@ -954,6 +983,9 @@ def run_influx_trend_calculation(dois, p):
 
 
 def delete_trending_table(session, duration):
+    """
+    delete the trending table
+    """
     query = """
             DELETE FROM trending
                 WHERE duration=:duration;
@@ -965,6 +997,9 @@ def delete_trending_table(session, duration):
 
 
 def save_or_update(session, obj, table, kwargs):
+    """
+    upsert postgresql of a given object and table
+    """
     obj_db = DAO.get_object(session, table, kwargs)
     if obj_db:
         session.delete(obj_db)
@@ -975,6 +1010,9 @@ def save_or_update(session, obj, table, kwargs):
 
 
 def save_trend_to_influx(record, trending_value, bucket):
+    """
+    save a calculated trend to influx
+    """
     point = {
         "measurement": "trending",
         "tags": {
@@ -1001,19 +1039,21 @@ def save_trend_to_influx(record, trending_value, bucket):
         },
         "time": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')}
 
-    # print(bucket)
-    # print(point)
     write_api.write(bucket, org, [point])
 
 
 async def write_event(data):
+    """
+    write a given event, this wraps the blocking sync api function in a async thread pool executor
+    """
     loop = asyncio.get_event_loop()
-    # Using None will create a ThreadPoolExecutor
-    # you can also pass in an executor (Thread or Process)
     await loop.run_in_executor(None, save_data_to_influx, data)
 
 
 def save_data_to_influx(data, retries=0):
+    """
+    save a event to influx, retries up to 10 times
+    """
     doi = data['obj']['data']['doi']
     createdAt = data['timestamp']
     score = data['subj']['processed']['score']
@@ -1046,20 +1086,26 @@ def save_data_to_influx(data, retries=0):
         write_api.write('currently', org, [point])
     except influxdb_client.rest.ApiException as e:
         print(e)
-        if retries < 10:
+        if retries < 10:  # to much?
             save_data_to_influx(data, (retries + 1))
+            time.sleep(3)
         else:
             print('LOST DATA')
     except urllib3.exceptions.NewConnectionError:
         print('NewConnectionError')
         if retries < 10:
             save_data_to_influx(data, (retries + 1))
+            time.sleep(3)
         else:
             print('LOST DATA')
             os.system("pkill -9 python")
 
 
 def doi_filter_list(doi_list, params):
+    """
+    helper function to generate a custom filter function based on a list of dois, this is faster than influx own array
+    functions but needs to be dynamically adjusted for the number of dois
+    """
     filter_string = "|> filter(fn: (r) =>"
     i = 0
     for doi in doi_list:
@@ -1070,7 +1116,6 @@ def doi_filter_list(doi_list, params):
     return {"string": filter_string, "params": params}
 
 
-# sink=[aggregated_topic]
 @app.agent(processed_topic)
 async def aggregate(events):
     """ aggregate events
