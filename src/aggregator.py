@@ -133,7 +133,7 @@ trending_time_definition = {
         'downsample_cron': '4 4 * * *',
         'downsample_offset': '15s',
         'numbers_window': timedelta(hours=24),
-        'numbers_cron': '39 */72 * * *',
+        'numbers_cron': '39 4 * * *',
         'numbers_offset': '15s'
     },
     'numbers': {
