@@ -1086,11 +1086,11 @@ def save_data_to_influx(data, retries=0):
         write_api.write('currently', org, [point])
     except influxdb_client.rest.ApiException as e:
         print(e)
-        if retries < 10:  # to much?
+        if retries < 5:  # to much?
             save_data_to_influx(data, (retries + 1))
-            time.sleep(3)
+            time.sleep(5)
         else:
-            print('LOST DATA')
+            print('LOST DATA ' + str(point['time']))
     except urllib3.exceptions.NewConnectionError:
         print('NewConnectionError')
         if retries < 10:
