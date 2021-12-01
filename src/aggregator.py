@@ -1057,7 +1057,7 @@ def save_data_to_influx(data, retries=0):
     doi = data['obj']['data']['doi']
     createdAt = data['timestamp']
     score = data['subj']['processed']['score']
-
+    print('save')
     point = {
         "measurement": "trending",
         "tags": {
