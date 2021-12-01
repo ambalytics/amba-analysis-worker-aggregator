@@ -1,5 +1,5 @@
 amba-event-stream
-faust-streaming
+faust-streaming==0.6.12
 influxdb-client
 influxdb-client[extra]
 pandas
