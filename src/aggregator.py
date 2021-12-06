@@ -455,6 +455,10 @@ def update_covid_trends():
     q3 = """
             REFRESH MATERIALIZED VIEW CONCURRENTLY trending_covid_papers;
             """
+    
+    q4 = """
+            REFRESH MATERIALIZED VIEW CONCURRENTLY counted_discussion_data;
+        """
     a = time.time()
 
     with DAO.engine.connect() as connection:
@@ -463,7 +467,9 @@ def update_covid_trends():
         result = connection.execute(text(q2))
     with DAO.engine.connect() as connection:
         result = connection.execute(text(q3))
-
+    with DAO.engine.connect() as connection:
+        result = connection.execute(text(q4))
+        
     print(time.time() - a)
     return True
 
